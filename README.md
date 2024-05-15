@@ -10,13 +10,15 @@ numpy                     1.26.2
 yfinance                  0.2.38
 optuna                    3.4.0
 
-## How to run AI model
-1. Run 'python train_model.py' to create the models.
-2. run 'python inference.py' to find out the optimized portfolio.
+## Model Training
+Run 'python train_model.py' to create the models.
+
+## Model inferencing
+Run 'python inference.py' to find out the optimized portfolio.
 
 
-## AI vs Human brain on Stock market
-This research project is to see if AI could beat human brain on the stock market.
+## AI vs Human
+Can AI beat human brain on the stock market?
 The stocks could be chosen from 4 markets: US, Sweden, Germany and British.
 
 
