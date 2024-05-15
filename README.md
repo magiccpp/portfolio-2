@@ -1,3 +1,20 @@
+# AssetScout 
+
+## Pre-requisites
+Create an Python environment with below libraries:
+
+scikit-learn              1.3.2
+pandas                    2.1.4
+pandas-datareader         0.10.0
+numpy                     1.26.2
+yfinance                  0.2.38
+optuna                    3.4.0
+
+## How to run AI model
+1. Run 'python train_model.py' to create the models.
+2. run 'python inference.py' to find out the optimized portfolio.
+
+
 # AI vs Human brain on Stock market
 This research project is to see if AI could beat human brain on the stock market.
 The stocks could be chosen from 4 markets: US, Sweden, Germany and British.
@@ -12,8 +29,5 @@ Every time each player change the asset portfolio, the trading_log.txt must be u
 
 No loss stop is allowed.
 
-## How to run AI model
-- Download the price data by running the notebook: download_price_data.ipynb
-- Find the optimized portfolio by running the notebook: predict_model_rf.ipynb
 
 

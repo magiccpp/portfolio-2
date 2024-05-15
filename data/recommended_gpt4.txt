@@ -139,5 +139,4 @@ E.ON SE (EOAN.DE)
 Rheinmetall (RHM.DE)
 BAE Systems (BA.L)
 ASML Holding (ASML)
-ARM (ARM)
 

@@ -4,34 +4,57 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.svm import SVR
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
+import signal
+
+# Create a class to handle timeout situations
+class TimeoutException(Exception):
+    pass
+
+def timeout_handler(signum, frame):
+    raise TimeoutException
+
+
+
+class TimeoutException(Exception):
+    pass
+
+def timeout_handler(signum, frame):
+    raise TimeoutException
+
 
 class SafeSVR(BaseEstimator, RegressorMixin):
-    def __init__(self, C=1.0, kernel='rbf', gamma='scale'):
+    def __init__(self, C, kernel, gamma, epsilon, timeout):
         self.C = C
         self.kernel = kernel
         self.gamma = gamma
+        self.epsilon = epsilon
+        self.timeout = timeout
 
     def _create_svr(self):
-        return SVR(C=self.C, kernel=self.kernel, gamma=self.gamma)
+        return SVR(C=self.C, kernel=self.kernel, gamma=self.gamma, 
+            epsilon=self.epsilon)
 
     def fit(self, X, y):
         self.svr = self._create_svr()
+
+        # Setting timeout signal
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(self.timeout)
         try:
             self.svr.fit(X, y)
+            signal.alarm(0)
+        except TimeoutException:
+            raise TimeoutException("Fitting has been interrupted due to timeout.")
         except LinAlgError:
-            print("LinAlgError encountered. Using a default SVR model.")
-            self.C = 1.0
-            self.kernel = 'rbf'
-            self.gamma = 'scale'
-            self.svr = self._create_svr()
-            self.svr.fit(X, y)
+            raise LinAlgError("Linear Algebra calculation failed.")
         return self
 
     def predict(self, X):
         return self.svr.predict(X)
 
     def get_params(self, deep=True):
-        return {'C': self.C, 'kernel': self.kernel, 'gamma': self.gamma}
+        return {'C': self.C, 'kernel': self.kernel, 
+            'gamma': self.gamma, 'epsilon': self.epsilon, 'timeout': self.timeout}
 
     def set_params(self, **parameters):
         for parameter, value in parameters.items():
@@ -41,7 +64,8 @@ class SafeSVR(BaseEstimator, RegressorMixin):
 
 class SafeRandomForestRegressor(BaseEstimator, RegressorMixin):
     def __init__(self, random_state=42, n_estimators=100, max_depth=None, min_samples_split=2,
-                 min_samples_leaf=1, max_features='auto', bootstrap=True, max_leaf_nodes=None):
+                 min_samples_leaf=1, max_features='auto', bootstrap=True, max_leaf_nodes=None,
+                 timeout=120):
         self.n_estimators = n_estimators
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
@@ -49,6 +73,7 @@ class SafeRandomForestRegressor(BaseEstimator, RegressorMixin):
         self.max_features = max_features
         self.bootstrap = bootstrap
         self.max_leaf_nodes = max_leaf_nodes
+        self.timeout = timeout
 
     def _create_rf(self):
         return RandomForestRegressor(
@@ -64,19 +89,15 @@ class SafeRandomForestRegressor(BaseEstimator, RegressorMixin):
 
     def fit(self, X, y):
         self.rf = self._create_rf()
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(self.timeout)
         try:
             self.rf.fit(X, y)
+            signal.alarm(0)
+        except TimeoutException:
+            raise TimeoutException("Fitting has been interrupted due to timeout.")
         except LinAlgError:
-            print("LinAlgError encountered. Using default RandomForestRegressor model.")
-            self.n_estimators = 100
-            self.max_depth = None
-            self.min_samples_split = 2
-            self.min_samples_leaf = 1
-            self.max_features = 'auto'
-            self.bootstrap = True
-            self.max_leaf_nodes = None
-            self.rf = self._create_rf()
-            self.rf.fit(X, y)
+            raise LinAlgError("Linear Algebra calculation failed.")
         return self
 
     def predict(self, X):
@@ -90,7 +111,8 @@ class SafeRandomForestRegressor(BaseEstimator, RegressorMixin):
             'min_samples_leaf': self.min_samples_leaf,
             'max_features': self.max_features,
             'bootstrap': self.bootstrap,
-            'max_leaf_nodes': self.max_leaf_nodes
+            'max_leaf_nodes': self.max_leaf_nodes,
+            'timeout': self.timeout
         }
 
     def set_params(self, **parameters):
