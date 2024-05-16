@@ -5,6 +5,13 @@ from sklearn.metrics import mean_squared_error
 from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
 
+INTEREST_RATE = 0.0497    # Current interest rate accessible for USD
+PERIOD = 128
+ANNUAL_TRADING_DAYS = 252
+LOG_RETURN_IN_PERIOD = np.log(1 + INTEREST_RATE) * PERIOD / ANNUAL_TRADING_DAYS
+
+
+
 def get_predict_X(stock_name, start='2018-01-01'):        
   df = load_latest_price_data(stock_name)
   df, feature_columns = add_features(df, 10)
@@ -40,12 +47,15 @@ def portfolio_return(weights, log_returns):
     returns = np.exp(log_returns) - 1
     return np.sum(returns*weights)
 
-def min_func_sharpe(weights, returns, covariance):
-    return -portfolio_log_return(weights, returns) / portfolio_volatility_log_return(weights, covariance)
+def min_func_sharpe(weights, returns, covariance, risk_free_rate):
+    portfolio_ret = portfolio_log_return(weights, returns)
+    portfolio_vol = portfolio_volatility_log_return(weights, covariance)
+    sharpe_ratio = (portfolio_ret - risk_free_rate) / portfolio_vol
+    return -sharpe_ratio  # Negate Sharpe ratio because we minimize the function
 
-def optimize_portfolio(returns, covariance):
+def optimize_portfolio(returns, covariance, risk_free_rate):
     num_assets = len(returns)
-    args = (returns, covariance)
+    args = (returns, covariance, risk_free_rate)
     constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
     bound = (0.0,0.15)
     bounds = tuple(bound for asset in range(num_assets))
@@ -156,7 +166,7 @@ S = get_shrinkage_covariance(all_errors.fillna(method='ffill').fillna(method='bf
 #S = all_errors.cov()
 #S = CovarianceShrinkage(all_errors).ledoit_wolf()
 mu = exp_profits
-raw_weights = optimize_portfolio(mu, S)
+raw_weights = optimize_portfolio(mu, S, LOG_RETURN_IN_PERIOD)
 
 adjusted_weights = adjust_weights(raw_weights.x)
 tickers_to_buy = []
