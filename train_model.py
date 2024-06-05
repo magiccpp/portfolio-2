@@ -1,6 +1,6 @@
 import uuid
-from util import get_tickers, get_currency_pair, load_latest_price_data, convert, add_features, load_pkl, merge_fred, remove_nan
-from util import save_pkl
+from util import get_X_y_by_stock, get_tickers, get_currency_pair, load_latest_price_data, convert, add_features, load_pkl, merge_fred, remove_nan
+from util import save_pkl, get_pipline_svr, get_pipline_rf
 from pandas_datareader import data as pdr
 import random
 import pandas as pd
@@ -22,102 +22,46 @@ import optuna
 import pickle
 from datetime import datetime
 from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+import logging
+import getopt
+import sys
+
+logger = logging.getLogger('training')
+logger.setLevel(logging.DEBUG)  # Set the logging level
+
+# Create a file handler
+file_handler = logging.FileHandler('training.log')
+file_handler.setLevel(logging.DEBUG)  # Set the logging level for the file handler
+
+# Create a console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)  # Set the logging level for the console handler
+
+# Create a formatter and set it for both handlers
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(formatter)
+console_handler.setFormatter(formatter)
+
+# Add the handlers to the logger
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 random.seed(42)
 
-# how many days to predict
-PREDICT_PERIOD=128
-
 # the minimal number of data entries for a stock
-MIN_TOTAL_DATA_PER_STOCK = 1000
-MIN_TRAINING_DATA_PER_STOCK = 500
-MIN_TEST_DATA_PER_STOCK = 300
+
 TIMEOUT = 120
 # number of trials to do the hyper-parameter optimization
-n_trails = 30
+N_TRIALS = 50
 
 tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt')
 selected_tickers = tickers
 #selected_tickers = random.sample(tickers, 10)
 
-def get_X_y_by_stock(stock_name, period, start, end, split_date='2018-01-01'):
-  print(f'processing {stock_name}...')
-  try:
-    df = load_latest_price_data(stock_name, start=start, end=end)
-  except FileNotFoundError:
-    print(f'Cannot find data for: {stock_name}')
-    return None, None, None, None
-  
-  if len(df) < MIN_TOTAL_DATA_PER_STOCK:
-    print(f'Cannot find enough data for: {stock_name}')
-    return None, None, None, None
 
-  stock_suffix = '.' + stock_name.split('.')[-1]
-  exchange_name, needs_inversion = get_currency_pair(stock_suffix, 'USD')
-  if exchange_name is not None:
-    df = convert(df, exchange_name, needs_inversion)
-    
-  if len(df) == 0:
-    print(f'empty table...')
-    return None, None, None, None
-
-  df, feature_columns = add_features(df, 10)
-  
-  # the predict is the log return of period days.
-  df['log_predict'] = np.log(df['Adj Close'].shift(-period) / df['Adj Close'])
-  
-
-  timestamp = df.index[0]
-  earliest_date = timestamp.strftime('%Y-%m-%d')
-  start = earliest_date
-  end = None
-
-
-
-  df, columns = merge_fred(df, 'M2SL', 6, start, end, 4, 2, if_log=True)
-  feature_columns += columns
-
-  
-  df, columns = merge_fred(df, 'UNRATE', 6, start, end, 1, 5, if_log=False)
-  feature_columns += columns
-
-  df, columns = merge_fred(df, 'FEDFUNDS', 6, start, end, 1, 5, if_log=False)
-  feature_columns += columns
-
-  df, _ = remove_nan(df, type='top')
-  if len(df) < MIN_TOTAL_DATA_PER_STOCK:
-    print(f'Cannot find enough data for: {stock_name}')
-    return None, None, None, None
-  df, _ = remove_nan(df, type='bottom')
-  if len(df) < MIN_TOTAL_DATA_PER_STOCK:
-    print(f'Cannot find enough data for: {stock_name}')
-    return None, None, None, None
-  
-  df = df[feature_columns + ['log_predict']]
-  df.dropna(inplace=True)
-  
-  if len(df) < MIN_TOTAL_DATA_PER_STOCK:
-    print(f'Cannot find enough data for: {stock_name}')
-    return None, None, None, None
-  
-  df_test = df[df.index >= split_date]
-  df_train = df[df.index < split_date]
-  if len(df_train) < MIN_TRAINING_DATA_PER_STOCK:
-    print(f'Cannot find enough training data for: {stock_name}')
-    return None, None, None, None
-  if len(df_test) < MIN_TEST_DATA_PER_STOCK:
-    print(f'Cannot find enough test data for: {stock_name}')
-    return None, None, None, None
-  df_train_X = df_train[feature_columns]
-  df_train_y = df_train[['log_predict']]
-  df_test_X = df_test[feature_columns]
-  df_test_y = df_test[['log_predict']]
-
-  return df_train_X, df_train_y, df_test_X, df_test_y
-
-
-def get_mse_from_hist_average(df_X, df_y, window_size):
-  return ((df_X['log_price_diff_128'].rolling(window=window_size).mean()[window_size:] - df_y['log_predict'][window_size:])**2).mean()
+def get_mse_from_hist_average(df_X, df_y, window_size, period):
+  return ((df_X[f'log_price_diff_{period}'].rolling(window=window_size).mean()[window_size:] - df_y['log_predict'][window_size:])**2).mean()
 
 
 def get_X_y(selected_tickers, period, start, end):
@@ -141,9 +85,9 @@ def get_X_y(selected_tickers, period, start, end):
     df_test_X_all.append(df_test_X)
     df_test_y_all.append(df_test_y)
     
-    mse_1 = get_mse_from_hist_average(df_test_X, df_test_y, 1)
-    mse_3 = get_mse_from_hist_average(df_test_X, df_test_y, 3)
-    mse_5 = get_mse_from_hist_average(df_test_X, df_test_y, 5)
+    mse_1 = get_mse_from_hist_average(df_test_X, df_test_y, 1, period)
+    mse_3 = get_mse_from_hist_average(df_test_X, df_test_y, 3, period)
+    mse_5 = get_mse_from_hist_average(df_test_X, df_test_y, 5, period)
 
     mean_square_errors_1.append(mse_1)
     mean_square_errors_3.append(mse_3)
@@ -152,6 +96,9 @@ def get_X_y(selected_tickers, period, start, end):
   return valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, {'mse_1': mean_square_errors_1, 'mse_3': mean_square_errors_3, 'mse_5': mean_square_errors_5}
 
 def save_data(data_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all):
+  # create data_dir if it does not exist
+  os.makedirs(data_dir, exist_ok=True)
+
   # save the valid_tickers in a text file under the directory
   with open(f'{data_dir}/valid_tickers.txt', 'w') as f:
       for ticker in valid_tickers:
@@ -162,13 +109,7 @@ def save_data(data_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X
   save_pkl(df_test_X_all, f'{data_dir}/df_test_X_all.pkl')
   save_pkl(df_test_y_all, f'{data_dir}/df_test_y_all.pkl')
 
-
-
-
-
-
-
-def objective_random_forest(trial):
+def objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all):
   # Define the hyperparameter configuration space
   k = trial.suggest_int('k', 5, len(df_train_X_all[0].columns))
   n_estimators = trial.suggest_int('n_estimators', 20, 160)
@@ -201,7 +142,7 @@ def objective_random_forest(trial):
   try:
     for i in range(len(valid_tickers)):
       if i % 100 == 0:
-        print(f'Processing {i}th stock...')
+        logger.info(f'Processing {i}th stock...')
       df_train_X = df_train_X_all[i]
       df_train_y = df_train_y_all[i]
 
@@ -215,11 +156,11 @@ def objective_random_forest(trial):
     
     return total_mses/len(valid_tickers)
   except TimeoutException:
-      print("A timeout has occurred during model fitting.")
+      logger.error("A timeout has occurred during model fitting.")
       # Return a large MSE value to penalize this result
       return float('inf')
 
-def objective_svm(trial):
+def objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all):
   # Define the hyperparameter configuration space
   k = trial.suggest_int('k', 5, len(df_train_X_all[0].columns))
   C = trial.suggest_float('C', 1e-3, 1e2,log=True)
@@ -231,6 +172,7 @@ def objective_svm(trial):
   model = SafeSVR(C=C,  kernel=kernel, gamma=gamma, epsilon=epsilon, timeout=TIMEOUT)
 
   pipeline = Pipeline([
+      ('scaler', StandardScaler()),  # Add scaler here
       ('truncate', SelectKBest(f_regression, k=k)), # Adjust 'k' as needed
       ('svr', model),
   ])
@@ -239,7 +181,7 @@ def objective_svm(trial):
   try:
     for i in range(len(valid_tickers)):
       if i % 100 == 0:
-        print(f'Processing {i}th stock...')
+        logger.info(f'Processing {i}th stock...')
       df_train_X = df_train_X_all[i]
       df_train_y = df_train_y_all[i]
 
@@ -253,7 +195,7 @@ def objective_svm(trial):
     
     return total_mses / len(valid_tickers)
   except TimeoutException:
-      print("A timeout has occurred during model fitting.")
+      logger.error("A timeout has occurred during model fitting.")
       # Return a large MSE value to penalize this result
       return float('inf')
 
@@ -278,50 +220,112 @@ def save_rf(best_params, model_dir):
       pickle.dump(best_pipeline, file)
   return best_pipeline
 
-def save_svm(best_params, model_dir):
+
+
+
+def save_model(pipeline, model_dir, model_name):
   # get current date
   os.makedirs(model_dir, exist_ok=True)
 
-  best_pipeline = Pipeline([
-          ('truncate', SelectKBest(f_regression, k=best_params['k'])), # Adjust 'k' as needed
-          ('regress', SafeSVR(
-            C=best_params['C'], 
-            epsilon=best_params['epsilon'], kernel=best_params['kernel'],
-            gamma=best_params['gamma'], timeout=TIMEOUT
-      ))])
+
   # Save to file in the current working directory
-  with open(f"{model_dir}/best_pipeline_svm.pkl", "wb") as file:  
-      pickle.dump(best_pipeline, file)
-  return best_pipeline
+  with open(f"{model_dir}/{model_name}", "wb") as file:  
+      pickle.dump(pipeline, file)
+  return pipeline
 
-
-
-
-
-def test_naive(valid_tickers, df_test_X_all, df_test_y_all):
+def test_naive(valid_tickers, df_test_X_all, df_test_y_all, period):
   naive_mses_1 = []
   naive_mses_8 = []
   naive_mses_16 = []
+  naive_mses_0 = []  # naive mse of using 0 as prediction
+  naive_mses_negation = []
+  naive_mses_avg_512 = []
   for i in range(len(valid_tickers)):
     stock_name = valid_tickers[i]
     df_test_X = df_test_X_all[i]
     df_test_y = df_test_y_all[i]
-    naive_mse_1 = get_mse_from_hist_average(df_test_X, df_test_y, 1)
+    naive_mse_1 = get_mse_from_hist_average(df_test_X, df_test_y, 1, period)
     #print(f'naive MSE_1 of {stock_name}: {naive_mse_1}')
     naive_mses_1.append(naive_mse_1)
 
-    naive_mse_8 = get_mse_from_hist_average(df_test_X, df_test_y, 8)
+    naive_mse_8 = get_mse_from_hist_average(df_test_X, df_test_y, 8, period)
     #print(f'naive MSE_8 of {stock_name}: {naive_mse_8}')
     naive_mses_8.append(naive_mse_8)
 
-    naive_mse_16 = get_mse_from_hist_average(df_test_X, df_test_y, 16)
+    naive_mse_16 = get_mse_from_hist_average(df_test_X, df_test_y, 16, period)
     #print(f'naive MSE_16 of {stock_name}: {naive_mse_16}')
     naive_mses_16.append(naive_mse_16)
 
-  print(f'The MSE of averaging past 1 * {PREDICT_PERIOD} days: {np.mean(naive_mses_1)}, std: {np.std(naive_mses_1)}')
-  print(f'The MSE of averaging past 8 * {PREDICT_PERIOD} days: {np.mean(naive_mses_8)}, std: {np.std(naive_mses_8)}')
-  print(f'The MSE of averaging past 16 * {PREDICT_PERIOD} days: {np.mean(naive_mses_16)}, std: {np.std(naive_mses_16)}')
+    naive_mse_0 = (df_test_y['log_predict']**2).mean()
+    naive_mses_0.append(naive_mse_0)
 
+    naive_mse_negation = mean_squared_error(df_test_X[f'log_price_diff_{period}'], df_test_y['log_predict'])
+    naive_mses_negation.append(naive_mse_negation)
+
+
+    divisor = 512/period
+    naive_mse_avg_512 = ((df_test_X[f'log_price_diff_512'].rolling(window=512).mean()[512:]/divisor - df_test_y['log_predict'][512:])**2).mean()
+    naive_mses_avg_512.append(naive_mse_avg_512)
+
+
+
+  logger.info(f'The MSE of averaging past 1 * {period} days: {np.mean(naive_mses_1)}, std: {np.std(naive_mses_1)}')
+  logger.info(f'The MSE of averaging past 8 * {period} days: {np.mean(naive_mses_8)}, std: {np.std(naive_mses_8)}')
+  logger.info(f'The MSE of averaging past 16 * {period} days: {np.mean(naive_mses_16)}, std: {np.std(naive_mses_16)}')
+  logger.info(f'The MSE of using 0 as prediction: {np.mean(naive_mses_0)}, std: {np.std(naive_mses_0)}')
+  logger.info(f'The MSE of using inverse of last period as prediction: {np.mean(naive_mses_negation)}, std: {np.std(naive_mses_negation)}')
+  logger.info(f'The MSE of using average of 512 days: {np.mean(naive_mses_avg_512)}, std: {np.std(naive_mses_avg_512)}')
+
+def test_all(best_pipeline_svm, best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all):
+  mses_rf = []
+  mses_svm = []
+  mses = []
+  all_errors = None
+  for i in range(len(valid_tickers)):
+    stock_name = valid_tickers[i]
+    logger.info(f'Starting test on {stock_name}...')
+    df_train_X = df_train_X_all[i]
+    df_train_y = df_train_y_all[i]
+    df_test_X = df_test_X_all[i]
+    df_test_y = df_test_y_all[i]
+
+    X_train = df_train_X.copy().values
+    y_train = df_train_y.copy().values.ravel()
+    X_test = df_test_X.copy().values
+    y_test = df_test_y.copy().values.ravel()
+
+    best_pipeline_svm.fit(X_train, y_train)
+    y_pred_svm = best_pipeline_svm.predict(X_test)
+
+    best_pipeline_rf.fit(X_train, y_train)
+    y_pred_rf = best_pipeline_rf.predict(X_test)
+
+    # y_pred is the average of the two predictions
+    y_pred = (y_pred_svm + y_pred_rf) / 2
+
+    df_error = pd.DataFrame(y_pred - y_test, index=df_test_y.index, columns=[stock_name])
+    if all_errors is None:
+      all_errors = df_error
+    else:
+      # concatenate the new dataframe to the existing one, column wise, use outer approach
+      all_errors = pd.concat([all_errors, df_error], axis=1, join='outer')
+
+    mse_rf = mean_squared_error(y_test, y_pred_rf)
+    mse_svm = mean_squared_error(y_test, y_pred_svm)
+    mse = mean_squared_error(y_test, y_pred)
+
+    logger.debug(f'{stock_name} MSE RF: {mse_rf}, MSE SVM: {mse_svm}, MSE Ensemble: {mse}')
+
+    mses_rf.append(mse_rf)
+    mses_svm.append(mse_svm)
+    mses.append(mse)
+
+  logger.info(f'MSE of RF: avg: {np.mean(mses_rf)}, std: {np.std(mses_rf)}')
+  logger.info(f'MSE of SVM: avg: {np.mean(mses_svm)}, std: {np.std(mses_svm)}')
+  logger.info(f'Ensemble: avg: {np.mean(mses)}, std: {np.std(mses)}')
+  
+
+    
 
 def test_rf(best_pipeline, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all):
   mse_rf = []
@@ -329,7 +333,7 @@ def test_rf(best_pipeline, valid_tickers, df_train_X_all, df_train_y_all, df_tes
 
   for i in range(len(valid_tickers)):
     stock_name = valid_tickers[i]
-    print(f'Starting test on {stock_name}...')
+    logger.info(f'Starting test on {stock_name}...')
     df_train_X = df_train_X_all[i]
     df_train_y = df_train_y_all[i]
     df_test_X = df_test_X_all[i]
@@ -356,7 +360,7 @@ def test_rf(best_pipeline, valid_tickers, df_train_X_all, df_train_y_all, df_tes
 
     # calculate the correlation between std_predictions and errors, this should be a single value
     correlation = df_std_preditions.corrwith(np.abs(df_error), axis=0).values[0]
-    print(f'Correlation between std_predictions and errors: {correlation}')
+    logger.debug(f'Correlation between std_predictions and errors: {correlation}')
 
     if all_errors is None:
       all_errors = df_error
@@ -365,11 +369,11 @@ def test_rf(best_pipeline, valid_tickers, df_train_X_all, df_train_y_all, df_tes
       all_errors = pd.concat([all_errors, df_error], axis=1, join='outer')
 
     mse = mean_squared_error(y_test, y_pred)
-    print(f'RF: MSE of {stock_name}: {mse}')
+    logger.debug(f'RF: MSE of {stock_name}: {mse}')
     mse_rf.append(mse)
 
-  print('The average MSE of RF: ', np.mean(mse_rf))
-  print('The STD of MSE of RF: ', np.std(mse_rf))
+  logger.info('The average MSE of RF: ', np.mean(mse_rf))
+  logger.info('The STD of MSE of RF: ', np.std(mse_rf))
 
 
 def test_svm(best_pipeline, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all):
@@ -390,11 +394,11 @@ def test_svm(best_pipeline, valid_tickers, df_train_X_all, df_train_y_all, df_te
     y_pred = best_pipeline.predict(X_test)
 
     mse = mean_squared_error(y_test, y_pred)
-    print(f'SVM: Test {valid_tickers[i]} MSE: {mse}')
+    logger.info(f'SVM: Test {valid_tickers[i]} MSE: {mse}')
     mses.append(mse)
 
-  print('The average MSE of SVM:', np.mean(mses))
-  print('The STD of MSE of SVM:', np.std(mses))
+  logger.info(f'The average MSE of SVM: {np.mean(mses)}')
+  logger.info(f'The STD of MSE of SVM: {np.std(mses)}')
 
 
 def if_data_exists(data_dir):
@@ -414,58 +418,130 @@ def if_data_exists(data_dir):
   return True
 
 
-# parse the input parameters and get the reload_data
-reload_data = False
-for i in range(1, len(os.sys.argv)):
-  if os.sys.argv[i] == '--reload_data':
-    reload_data = True
+def main(argv):
+  logger.info('training started...')
+  period = None
+  iterations = 10
+  try:
+      # delete: delete the previous study
+      opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "iter=", "reload", "delete"])
+  except getopt.GetoptError:
+    logger.error('usage: train_model.py --period <days> --iter <iterations> --reload --delete')
+    sys.exit(2)
 
-data_dir = './processed_data'
-if reload_data or not if_data_exists(data_dir):
-  print(f'Preparing data from {len(selected_tickers)} assets...')
-  start = '1970-01-01'
-  end = '2024-01-01'
-  valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, mses = get_X_y(selected_tickers, PREDICT_PERIOD, start, end)
-  save_data(data_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
-  print(f'Data saved to {data_dir}...')
-else:
-  df_train_X_all = load_pkl(f'{data_dir}/df_train_X_all.pkl')
-  df_train_y_all = load_pkl(f'{data_dir}/df_train_y_all.pkl')
-  df_test_X_all = load_pkl(f'{data_dir}/df_test_X_all.pkl')
-  df_test_y_all = load_pkl(f'{data_dir}/df_test_y_all.pkl')
-  with open(f'{data_dir}/valid_tickers.txt', 'r') as f:
-    valid_tickers = f.read().splitlines()
-  print(f'Data loaded from {data_dir}...')
+  reload_data = False
+  delete_study = False
+  for opt, arg in opts:
+    if opt in ("-p", "--period"):
+        period = int(arg)
+    elif opt in ("-i", "--iter"):
+        iterations = int(arg)
+    elif opt in ("-r", "--reload"):
+        reload_data = True
+    elif opt in ("-d", "--delete"):
+        delete_study = True
+
+  if period is None:
+    logger.error('usage: script.py --period <days> --iter <iterations>')
+    sys.exit(2)
+
+  if iterations is None:
+    iterations = N_TRIALS
+
+  data_dir = f'./processed_data_{period}'
+  if reload_data or not if_data_exists(data_dir):
+    logger.info(f'Preparing data from {len(selected_tickers)} assets...')
+    start = '1970-01-01'
+    end = '2024-01-01'
+    valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, mses = get_X_y(selected_tickers, period, start, end)
+    save_data(data_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
+    logger.info(f'Data saved to {data_dir}...')
+  else:
+    df_train_X_all = load_pkl(f'{data_dir}/df_train_X_all.pkl')
+    df_train_y_all = load_pkl(f'{data_dir}/df_train_y_all.pkl')
+    df_test_X_all = load_pkl(f'{data_dir}/df_test_X_all.pkl')
+    df_test_y_all = load_pkl(f'{data_dir}/df_test_y_all.pkl')
+    with open(f'{data_dir}/valid_tickers.txt', 'r') as f:
+      valid_tickers = f.read().splitlines()
+    logger.info(f'Data loaded from {data_dir}...')
+
+  logger.info(f'Data preparation finished, found {len(valid_tickers)} assets with enough data.')
+  logger.info('Starting finding optimized hyper-parameters for the random forest...')
 
 
+  np.random.seed(42)
+ 
 
-print(f'Data preparation finished, found {len(valid_tickers)} assets with enough data.')
-print('Starting finding optimized hyper-parameters for the random forest...')
+  mysql_url = "mysql://root@192.168.2.34:3306/mysql"
+  n_columns = len(df_train_X_all[0].columns)
+
+  print('Starting finding optimized hyper-parameters for the RF...')
+  study_rf_name = f'study_rf_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
+  study_rf = optuna.create_study(study_name=study_rf_name, storage=mysql_url, load_if_exists=True)
+
+  if delete_study:
+    optuna.delete_study(study_svm_name, storage=mysql_url)
+    logger.info(f'Study {study_svm_name} deleted...')
+
+  # check if study_svm contains best value.
+  if len(study_rf.get_trials()) > 0:
+    best_value_rf = study_rf.best_trial.value
+  else:
+    best_value_rf = None
 
 
-np.random.seed(42)
+  study_rf.optimize(lambda trial: objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all), 
+                    n_trials=iterations)
+  best_value_rf_new = study_rf.best_value
+
+  if best_value_rf_new is not None and (best_value_rf is None or best_value_rf_new < best_value_rf):
+    best_pipeline_rf = get_pipline_rf(study_rf.best_params)
+    cur_date_hour = datetime.now().strftime('%m%d%y%H%M')
+    model_dir = f'models/model_{cur_date_hour}_stocks_{len(valid_tickers)}_period_{period}'
+    save_model(best_pipeline_rf, 'best_pipeline_rf.pkl')
+    logger.info(f'RF Model saved to {model_dir}...')
+  else:
+    logger.info('No better model found...')
+    best_pipeline_rf = get_pipline_rf(study_rf.best_params)
 
 
-mysql_url = "mysql://root@192.168.2.34:3306/mysql"
-n_columns = len(df_train_X_all[0].columns)
+  print('Starting finding optimized hyper-parameters for the SVM...')
+  study_svm_name = f'study_svm_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
+  study_svm = optuna.create_study(study_name=study_svm_name, storage=mysql_url, load_if_exists=True)  
 
-study_rf_name = f'study_rf_columns_{n_columns}_stocks_{len(valid_tickers)}'
-study_rf = optuna.create_study(study_name=study_rf_name, storage=mysql_url, load_if_exists=True)
-study_rf.optimize(objective_random_forest, n_trials=n_trails) # Adjust the number of trials
+  if delete_study:
+    optuna.delete_study(study_svm_name, storage=mysql_url)
+    logger.info(f'Study {study_svm_name} deleted...')
 
-study_svm_name = f'study_svm_columns_{n_columns}'
-study_svm = optuna.create_study(study_name=study_svm_name, storage=mysql_url, load_if_exists=True)
-study_svm.optimize(objective_svm, n_trials=n_trails) # Adjust the number of trials
+  # check if study_svm contains best value.
+  if len(study_svm.get_trials()) > 0:
+    best_value_svm = study_rf.best_trial.value
+  else:
+    best_value_svm = None
 
-model_id = uuid.uuid4()
-cur_date = datetime.now().strftime('%m%d%y')
-model_dir = f'models/model_{cur_date}_{model_id}_stocks_{len(valid_tickers)}'
-best_pipeline_rf = save_rf(study_rf.best_params, model_dir)
-best_pipeline_svm = save_svm(study_svm.best_params, model_dir)
+  study_svm.optimize(lambda trial: objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all), n_trials=iterations)
+  
+  best_value_svm_new = study_svm.best_value
+  if best_value_svm_new is not None and (best_value_svm is None or best_value_svm_new < best_value_svm):
+    logger.info(f'new best value found: {best_value_svm_new}')
+    
+    cur_date_hour = datetime.now().strftime('%m%d%y%H%M')
+    model_dir = f'models/model_{cur_date_hour}_stocks_{len(valid_tickers)}_period_{period}'
+    #best_pipeline_rf = save_rf(study_rf.best_params, model_dir)
+    best_pipeline_svm = get_pipline_svr(study_svm.best_params)
+    save_model(best_pipeline_svm, model_dir, 'best_pipeline_svm.pkl')
+    logger.info(f'Model saved to {model_dir}...')
+  else:
+    logger.info(f'No better model found')
+    best_pipeline_svm = get_pipline_svr(study_svm.best_params)
 
-print(f'Model saved to {model_dir}...')
-print(f'Starting test')
+  logger.info(f'Starting test')
 
-test_naive(valid_tickers, df_test_X_all, df_test_y_all)
-test_rf(best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
-test_svm(best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
+  test_naive(valid_tickers, df_test_X_all, df_test_y_all, period)
+  #test_rf(best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
+  test_all(best_pipeline_rf, best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
+  #test_svm(best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
+  
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

@@ -1,15 +1,23 @@
 import pandas as pd
 from datetime import timedelta
 from pandas_datareader import data as pdr
+from safeRegressors import SafeRandomForestRegressor, SafeSVR
 import yfinance as yfin
 import os
 import time
 import numpy as np
 import pickle
-
+from sklearn.feature_selection import SelectKBest
+from sklearn.feature_selection import f_regression
+from sklearn.pipeline import Pipeline
 yfin.pdr_override()
 
 NUMBER_RECENT_SECONDS = 72000
+MIN_TOTAL_DATA_PER_STOCK = 1000
+MIN_TRAINING_DATA_PER_STOCK = 500
+MIN_TEST_DATA_PER_STOCK = 300
+TIMEOUT = 120
+
 
 def get_tickers(ticker_list_file):
   with open(f'data/{ticker_list_file}', 'r') as f:
@@ -55,7 +63,7 @@ def get_table_by_id_fred(id, path, n_features,
   if not is_file_downloaded_recently(file_path):
     print(f'Metric: {id} need to be refreshed...')
     df = pdr.get_data_fred(id, start='1950-01-01', end=None)
-    df.to_csv(f'data/fred/{id}.csv')
+    df.to_csv(f'{path}/{id}.csv')
 
   df = pd.read_csv(os.path.join(path, f'{id}.csv'), index_col='DATE', parse_dates=True)
   df = df[start:end]
@@ -211,6 +219,82 @@ def load_latest_price_data(stock_name, start='1950-01-01', end=None):
   return df
 
 
+def   get_X_y_by_stock(stock_name, period, start, end, split_date='2018-01-01'):
+  print(f'processing {stock_name}...')
+  try:
+    df = load_latest_price_data(stock_name, start=start, end=end)
+  except FileNotFoundError:
+    print(f'Cannot find data for: {stock_name}')
+    return None, None, None, None
+  
+  if len(df) < MIN_TOTAL_DATA_PER_STOCK:
+    print(f'Cannot find enough data for: {stock_name}')
+    return None, None, None, None
+
+  stock_suffix = '.' + stock_name.split('.')[-1]
+  exchange_name, needs_inversion = get_currency_pair(stock_suffix, 'USD')
+  if exchange_name is not None:
+    df = convert(df, exchange_name, needs_inversion)
+    
+  if len(df) == 0:
+    print(f'empty table...')
+    return None, None, None, None
+
+  df, feature_columns = add_features(df, 10)
+  
+  # the predict is the log return of period days.
+  df['log_predict'] = np.log(df['Adj Close'].shift(-period) / df['Adj Close'])
+  
+
+  timestamp = df.index[0]
+  earliest_date = timestamp.strftime('%Y-%m-%d')
+  start = earliest_date
+  end = None
+
+
+
+  df, columns = merge_fred(df, 'M2SL', 6, start, end, 4, 2, if_log=True)
+  feature_columns += columns
+
+  
+  df, columns = merge_fred(df, 'UNRATE', 6, start, end, 1, 5, if_log=False)
+  feature_columns += columns
+
+  df, columns = merge_fred(df, 'FEDFUNDS', 6, start, end, 1, 5, if_log=False)
+  feature_columns += columns
+
+  df, _ = remove_nan(df, type='top')
+  if len(df) < MIN_TOTAL_DATA_PER_STOCK:
+    print(f'Cannot find enough data for: {stock_name}')
+    return None, None, None, None
+  df, _ = remove_nan(df, type='bottom')
+  if len(df) < MIN_TOTAL_DATA_PER_STOCK:
+    print(f'Cannot find enough data for: {stock_name}')
+    return None, None, None, None
+  
+  df = df[feature_columns + ['log_predict']]
+  df.dropna(inplace=True)
+  
+  if len(df) < MIN_TOTAL_DATA_PER_STOCK:
+    print(f'Cannot find enough data for: {stock_name}')
+    return None, None, None, None
+  
+  df_test = df[df.index >= split_date]
+  df_train = df[df.index < split_date]
+
+  if len(df_train) < MIN_TRAINING_DATA_PER_STOCK:
+    print(f'Cannot find enough training data for: {stock_name}')
+    return None, None, None, None
+  if len(df_test) < MIN_TEST_DATA_PER_STOCK:
+    print(f'Cannot find enough test data for: {stock_name}')
+    return None, None, None, None
+  df_train_X = df_train[feature_columns]
+  df_train_y = df_train[['log_predict']]
+  df_test_X = df_test[feature_columns]
+  df_test_y = df_test[['log_predict']]
+
+  return df_train_X, df_train_y, df_test_X, df_test_y
+
 def save_pkl(object, file):
   with open(file, 'wb') as f:
     pickle.dump(object, f)
@@ -219,3 +303,32 @@ def save_pkl(object, file):
 def load_pkl(file):
   with open(file, 'rb') as f:
     return pickle.load(f)
+  
+
+def get_pipline_rf(best_params):
+  pipeline = Pipeline([
+          ('truncate', SelectKBest(f_regression, k=best_params['k'])), # Adjust 'k' as needed
+          ('regress', SafeRandomForestRegressor(
+            n_estimators=best_params['n_estimators'],
+            max_depth=best_params['max_depth'],
+            min_samples_split=best_params['min_samples_split'],
+            min_samples_leaf=best_params['min_samples_leaf'],
+            max_features=best_params['max_features'],
+            bootstrap=best_params['bootstrap'],
+            max_leaf_nodes=best_params['max_leaf_nodes'],
+            timeout=TIMEOUT
+      ))])
+  
+  return pipeline
+
+
+def get_pipline_svr(best_params):
+  pipeline = Pipeline([
+          ('truncate', SelectKBest(f_regression, k=best_params['k'])), # Adjust 'k' as needed
+          ('regress', SafeSVR(
+            C=best_params['C'], 
+            epsilon=best_params['epsilon'], kernel=best_params['kernel'],
+            gamma=best_params['gamma'], timeout=TIMEOUT
+      ))])
+  
+  return pipeline

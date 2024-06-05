@@ -5,7 +5,7 @@ from sklearn.svm import SVR
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
 import signal
-
+from sklearn.utils import shuffle
 # Create a class to handle timeout situations
 class TimeoutException(Exception):
     pass
@@ -41,6 +41,7 @@ class SafeSVR(BaseEstimator, RegressorMixin):
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.alarm(self.timeout)
         try:
+            # shuffle the data
             self.svr.fit(X, y)
             signal.alarm(0)
         except TimeoutException:
