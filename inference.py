@@ -236,8 +236,8 @@ def main(argv):
         logger.info(f'index: {index} {ticker_name}: weight {adjusted_weight} exp profit: {exp_profits[index]}, variance: {S[ticker_name][ticker_name]}')
         tickers_to_buy.append(ticker_name)
 
-  logger.info(f'expected return in 128 trading days: {portfolio_return(adjusted_weights, mu)}')
-  logger.info(f'volatility of the return in 128 trading days: {portfolio_volatility(adjusted_weights, S)}')
+  logger.info(f'expected return in {period} trading days: {portfolio_return(adjusted_weights, mu)}')
+  logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(adjusted_weights, S)}')
 
 if __name__ == "__main__":
     main(sys.argv[1:])

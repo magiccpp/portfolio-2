@@ -57,6 +57,8 @@ N_TRIALS = 50
 
 tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt')
 selected_tickers = tickers
+
+
 #selected_tickers = random.sample(tickers, 10)
 
 
@@ -64,7 +66,7 @@ def get_mse_from_hist_average(df_X, df_y, window_size, period):
   return ((df_X[f'log_price_diff_{period}'].rolling(window=window_size).mean()[window_size:] - df_y['log_predict'][window_size:])**2).mean()
 
 
-def get_X_y(selected_tickers, period, start, end):
+def get_X_y(selected_tickers, period, start, end, split_date):
   df_train_X_all = []
   df_train_y_all = []
   df_test_X_all = []
@@ -74,7 +76,7 @@ def get_X_y(selected_tickers, period, start, end):
   mean_square_errors_5 = []
   valid_tickers = []
   for stock_name in selected_tickers:
-    df_train_X, df_train_y, df_test_X, df_test_y = get_X_y_by_stock(stock_name, period, start, end)
+    df_train_X, df_train_y, df_test_X, df_test_y = get_X_y_by_stock(stock_name, period, start, end, split_date)
     if df_train_X is None:
       continue 
     
@@ -453,7 +455,8 @@ def main(argv):
     logger.info(f'Preparing data from {len(selected_tickers)} assets...')
     start = '1970-01-01'
     end = '2024-01-01'
-    valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, mses = get_X_y(selected_tickers, period, start, end)
+    valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, mses = \
+      get_X_y(selected_tickers, period, start, end, split_date='2019-01-01')
     save_data(data_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
     logger.info(f'Data saved to {data_dir}...')
   else:
@@ -477,12 +480,15 @@ def main(argv):
 
   print('Starting finding optimized hyper-parameters for the RF...')
   study_rf_name = f'study_rf_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
-  study_rf = optuna.create_study(study_name=study_rf_name, storage=mysql_url, load_if_exists=True)
-
   if delete_study:
-    optuna.delete_study(study_svm_name, storage=mysql_url)
-    logger.info(f'Study {study_svm_name} deleted...')
+    try:
+      optuna.delete_study(study_rf_name, storage=mysql_url)
+      logger.info(f'Study {study_rf_name} deleted...')
+    except:
+      # pass if the study does not exist
+      pass
 
+  study_rf = optuna.create_study(study_name=study_rf_name, storage=mysql_url, load_if_exists=True)
   # check if study_svm contains best value.
   if len(study_rf.get_trials()) > 0:
     best_value_rf = study_rf.best_trial.value
@@ -496,22 +502,24 @@ def main(argv):
 
   if best_value_rf_new is not None and (best_value_rf is None or best_value_rf_new < best_value_rf):
     best_pipeline_rf = get_pipline_rf(study_rf.best_params)
-    cur_date_hour = datetime.now().strftime('%m%d%y%H%M')
-    model_dir = f'models/model_{cur_date_hour}_stocks_{len(valid_tickers)}_period_{period}'
-    save_model(best_pipeline_rf, 'best_pipeline_rf.pkl')
-    logger.info(f'RF Model saved to {model_dir}...')
+
+    logger.info(f'new best value found: {best_value_rf_new}')
   else:
     logger.info('No better model found...')
     best_pipeline_rf = get_pipline_rf(study_rf.best_params)
 
 
-  print('Starting finding optimized hyper-parameters for the SVM...')
+  print('Starting finding optimized hyper-parameters for SVM...')
   study_svm_name = f'study_svm_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
-  study_svm = optuna.create_study(study_name=study_svm_name, storage=mysql_url, load_if_exists=True)  
-
   if delete_study:
-    optuna.delete_study(study_svm_name, storage=mysql_url)
-    logger.info(f'Study {study_svm_name} deleted...')
+    try:
+      optuna.delete_study(study_svm_name, storage=mysql_url)
+      logger.info(f'Study {study_svm_name} deleted...')
+    except:
+      # pass if the study does not exist
+      pass
+
+  study_svm = optuna.create_study(study_name=study_svm_name, storage=mysql_url, load_if_exists=True)
 
   # check if study_svm contains best value.
   if len(study_svm.get_trials()) > 0:
@@ -524,13 +532,7 @@ def main(argv):
   best_value_svm_new = study_svm.best_value
   if best_value_svm_new is not None and (best_value_svm is None or best_value_svm_new < best_value_svm):
     logger.info(f'new best value found: {best_value_svm_new}')
-    
-    cur_date_hour = datetime.now().strftime('%m%d%y%H%M')
-    model_dir = f'models/model_{cur_date_hour}_stocks_{len(valid_tickers)}_period_{period}'
-    #best_pipeline_rf = save_rf(study_rf.best_params, model_dir)
     best_pipeline_svm = get_pipline_svr(study_svm.best_params)
-    save_model(best_pipeline_svm, model_dir, 'best_pipeline_svm.pkl')
-    logger.info(f'Model saved to {model_dir}...')
   else:
     logger.info(f'No better model found')
     best_pipeline_svm = get_pipline_svr(study_svm.best_params)

@@ -162,29 +162,45 @@ currency_mapping = {
 
 # Map currency pairs to directions
 conversion_mapping = {
-  ('SEK', 'USD'): ('DEXSDUS', True),
-  ('EUR', 'USD'): ('DEXUSEU', False),
-  ('GBP', 'USD'): ('DEXUSUK', False),
+  ('SEK', 'USD'): ('DEXSDUS', True, 'SEK=X'),
+  ('EUR', 'USD'): ('DEXUSEU', False, 'EURUSD=X'),
+  ('GBP', 'USD'): ('DEXUSUK', False, 'GBPUSD=X'),
 }
 
 def get_currency_pair(stock_suffix, base_currency):
     stock_base_currency = currency_mapping.get(stock_suffix, 'USD')
     if base_currency == stock_base_currency:
-        return None, None  # No conversion needed
+        return None, None, None  # No conversion needed
     else:
         return conversion_mapping.get((stock_base_currency, base_currency))
 
 
-def read_and_filter_exchange_rates(exchange_name):
-  return read_and_filter(exchange_name, 'data/fred')
+def read_and_filter_exchange_rates(exchange_name, exchange_name_yahoo, path='data/fred'):
+  return read_and_filter(exchange_name, exchange_name_yahoo, path)
 
-def read_and_filter(name, path):
-  filepath = f'{path}/{name}.csv'
+def read_and_filter(exchange_name, exchange_name_yahoo, path):
+  filepath = f'{path}/{exchange_name}.csv'
+  if not is_file_downloaded_recently(filepath):
+    print(f'Metric: {exchange_name} need to be refreshed...')
+    df = pdr.get_data_fred(exchange_name, start='1950-01-01', end=None)
+
+    # fred data is out of date, we use yahoo data as complement
+    df2 = pdr.get_data_yahoo(exchange_name_yahoo, start='1950-01-01', end=None)
+
+    index_name = df.index.name
+    df = df.join(df2[['Adj Close']], how='outer')
+    df.index.name = index_name
+
+    df[exchange_name].fillna(df['Adj Close'], inplace=True)
+    df.drop('Adj Close', axis=1, inplace=True)
+    df.dropna(inplace=True)
+    df.to_csv(f'{path}/{exchange_name}.csv')
+
   df = pd.read_csv(filepath, index_col='DATE', parse_dates=True)
   return df
 
-def convert(df, exchange_name, inversion):
-  df_rate = read_and_filter_exchange_rates(exchange_name)
+def convert(df, exchange_name, inversion, exchange_name_yahoo):
+  df_rate = read_and_filter_exchange_rates(exchange_name, exchange_name_yahoo)
   start = max(df.index[0], df_rate.index[0])
   df = df[df.index >= start]
   df_rate = df_rate[df_rate.index >= start]
@@ -216,10 +232,17 @@ def load_latest_price_data(stock_name, start='1950-01-01', end=None):
       print(f'Cannot download {stock_name}, using old data...')
 
   df = pd.read_csv(file_path, index_col='Date', parse_dates=True)
+  if len(df) < 100:
+    return None
+  
+  stock_suffix = '.' + stock_name.split('.')[-1]
+  exchange_name, needs_inversion, exchange_name_yahoo = get_currency_pair(stock_suffix, 'USD')
+  if exchange_name is not None:
+    df = convert(df, exchange_name, needs_inversion, exchange_name_yahoo)
   return df
 
 
-def   get_X_y_by_stock(stock_name, period, start, end, split_date='2018-01-01'):
+def   get_X_y_by_stock(stock_name, period, start, end, split_date):
   print(f'processing {stock_name}...')
   try:
     df = load_latest_price_data(stock_name, start=start, end=end)
@@ -227,14 +250,9 @@ def   get_X_y_by_stock(stock_name, period, start, end, split_date='2018-01-01'):
     print(f'Cannot find data for: {stock_name}')
     return None, None, None, None
   
-  if len(df) < MIN_TOTAL_DATA_PER_STOCK:
+  if df is None or len(df) < MIN_TOTAL_DATA_PER_STOCK:
     print(f'Cannot find enough data for: {stock_name}')
     return None, None, None, None
-
-  stock_suffix = '.' + stock_name.split('.')[-1]
-  exchange_name, needs_inversion = get_currency_pair(stock_suffix, 'USD')
-  if exchange_name is not None:
-    df = convert(df, exchange_name, needs_inversion)
     
   if len(df) == 0:
     print(f'empty table...')
