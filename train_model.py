@@ -26,6 +26,8 @@ from sklearn.preprocessing import StandardScaler
 import logging
 import getopt
 import sys
+from sklearn.preprocessing import FunctionTransformer
+
 
 logger = logging.getLogger('training')
 logger.setLevel(logging.DEBUG)  # Set the logging level
@@ -135,8 +137,12 @@ def objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all
       timeout=TIMEOUT
   )
 
+  truncation_transformer = FunctionTransformer(
+      lambda X: X.iloc[:, :k], validate=True
+  )
+
   pipeline = Pipeline([
-      ('truncate', SelectKBest(f_regression, k=k)), # Adjust 'k' as needed
+      ('truncate', truncation_transformer),
       ('regress', model),
   ])
 
@@ -145,14 +151,12 @@ def objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all
     for i in range(len(valid_tickers)):
       if i % 100 == 0:
         logger.info(f'Processing {i}th stock...')
-      df_train_X = df_train_X_all[i]
+      df_train_X = df_train_X_all[i].iloc[:, :k]
       df_train_y = df_train_y_all[i]
 
       X_train = df_train_X.copy().values
       y_train = df_train_y.copy().values.ravel()
-
       predictions = cross_val_predict(pipeline, X_train, y_train, cv=5, n_jobs=5)
-
       mse = mean_squared_error(y_train, predictions)
       total_mses += mse
     
@@ -161,6 +165,8 @@ def objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all
       logger.error("A timeout has occurred during model fitting.")
       # Return a large MSE value to penalize this result
       return float('inf')
+
+
 
 def objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all):
   # Define the hyperparameter configuration space
@@ -172,10 +178,14 @@ def objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all):
 
   # Model setup
   model = SafeSVR(C=C,  kernel=kernel, gamma=gamma, epsilon=epsilon, timeout=TIMEOUT)
+  # Define the custom transformer
+  truncation_transformer = FunctionTransformer(
+      lambda X: X.iloc[:, :k], validate=True
+  )
 
   pipeline = Pipeline([
       ('scaler', StandardScaler()),  # Add scaler here
-      ('truncate', SelectKBest(f_regression, k=k)), # Adjust 'k' as needed
+      ('truncate', truncation_transformer),
       ('svr', model),
   ])
 
@@ -184,7 +194,7 @@ def objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all):
     for i in range(len(valid_tickers)):
       if i % 100 == 0:
         logger.info(f'Processing {i}th stock...')
-      df_train_X = df_train_X_all[i]
+      df_train_X = df_train_X_all[i].iloc[:, :k]
       df_train_y = df_train_y_all[i]
 
       X_train = df_train_X.copy().values
@@ -419,6 +429,29 @@ def if_data_exists(data_dir):
     return False
   return True
 
+# get the sorted feature in descending order of importance.
+def get_sorted_features(df_train_X_all, df_train_y_all):
+  tot_scores = None
+  for i in range(len(df_train_X_all)):
+    # Filter the training and testing data for the current stock
+    df_train_X_stock = df_train_X_all[i]
+    df_train_y_stock = df_train_y_all[i]
+
+    # Apply feature selection using SelectKBest
+    selector = SelectKBest(f_regression, k=5)  # Select 5 best features
+    selector.fit(df_train_X_stock, df_train_y_stock['log_predict'])
+    scores = selector.scores_
+
+    # make element-wise addition for tot_scores
+    if tot_scores is None:
+        tot_scores = scores/len(df_train_X_all)
+    else:
+        tot_scores += scores/len(df_train_X_all)
+  # Get the scores in descending order
+  feature_names = df_train_X_all[0].columns
+  sorted_scores = scores.argsort()[::-1]  # Sort indices in descending order of scores
+  sorted_features = feature_names[sorted_scores]
+  return sorted_features
 
 def main(argv):
   logger.info('training started...')
@@ -469,6 +502,16 @@ def main(argv):
     logger.info(f'Data loaded from {data_dir}...')
 
   logger.info(f'Data preparation finished, found {len(valid_tickers)} assets with enough data.')
+  logger.info("Finding the importances of features...")
+  sorted_features = get_sorted_features(df_train_X_all, df_train_y_all)
+  logger.info(f'The ordered features are: {sorted_features}')
+
+  # iterate all tickers, reorder the features based on the scores by descending order
+  for i in range(len(valid_tickers)):
+    df_train_X_all[i] = df_train_X_all[i][sorted_features]
+
+
+
   logger.info('Starting finding optimized hyper-parameters for the random forest...')
 
 
