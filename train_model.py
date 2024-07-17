@@ -27,7 +27,7 @@ import logging
 import getopt
 import sys
 from sklearn.preprocessing import FunctionTransformer
-
+from sklearn.base import BaseEstimator, TransformerMixin
 
 logger = logging.getLogger('training')
 logger.setLevel(logging.DEBUG)  # Set the logging level
@@ -113,6 +113,19 @@ def save_data(data_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X
   save_pkl(df_test_X_all, f'{data_dir}/df_test_X_all.pkl')
   save_pkl(df_test_y_all, f'{data_dir}/df_test_y_all.pkl')
 
+
+class TruncationTransformer(BaseEstimator, TransformerMixin):
+  def __init__(self, k):
+    self.k = k
+
+  def fit(self, X, y=None):
+    # Since this transformer is stateless, the fit method only needs to pass
+    return self
+
+  def transform(self, X, y=None):
+    return X[:, :self.k]
+
+
 def objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all):
   # Define the hyperparameter configuration space
   k = trial.suggest_int('k', 5, len(df_train_X_all[0].columns))
@@ -137,12 +150,8 @@ def objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all
       timeout=TIMEOUT
   )
 
-  truncation_transformer = FunctionTransformer(
-      lambda X: X.iloc[:, :k], validate=True
-  )
-
   pipeline = Pipeline([
-      ('truncate', truncation_transformer),
+      ('truncate', TruncationTransformer(k=k)),
       ('regress', model),
   ])
 
@@ -151,7 +160,7 @@ def objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all
     for i in range(len(valid_tickers)):
       if i % 100 == 0:
         logger.info(f'Processing {i}th stock...')
-      df_train_X = df_train_X_all[i].iloc[:, :k]
+      df_train_X = df_train_X_all[i]
       df_train_y = df_train_y_all[i]
 
       X_train = df_train_X.copy().values
@@ -178,14 +187,10 @@ def objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all):
 
   # Model setup
   model = SafeSVR(C=C,  kernel=kernel, gamma=gamma, epsilon=epsilon, timeout=TIMEOUT)
-  # Define the custom transformer
-  truncation_transformer = FunctionTransformer(
-      lambda X: X.iloc[:, :k], validate=True
-  )
 
   pipeline = Pipeline([
       ('scaler', StandardScaler()),  # Add scaler here
-      ('truncate', truncation_transformer),
+      ('truncate', TruncationTransformer(k=k)),
       ('svr', model),
   ])
 
@@ -194,7 +199,7 @@ def objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all):
     for i in range(len(valid_tickers)):
       if i % 100 == 0:
         logger.info(f'Processing {i}th stock...')
-      df_train_X = df_train_X_all[i].iloc[:, :k]
+      df_train_X = df_train_X_all[i]
       df_train_y = df_train_y_all[i]
 
       X_train = df_train_X.copy().values
@@ -509,15 +514,11 @@ def main(argv):
   # iterate all tickers, reorder the features based on the scores by descending order
   for i in range(len(valid_tickers)):
     df_train_X_all[i] = df_train_X_all[i][sorted_features]
-
-
+    df_test_X_all[i] = df_test_X_all[i][sorted_features]
 
   logger.info('Starting finding optimized hyper-parameters for the random forest...')
-
-
   np.random.seed(42)
  
-
   mysql_url = "mysql://root@192.168.2.34:3306/mysql"
   n_columns = len(df_train_X_all[0].columns)
 
@@ -538,19 +539,16 @@ def main(argv):
   else:
     best_value_rf = None
 
-
   study_rf.optimize(lambda trial: objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all), 
                     n_trials=iterations)
   best_value_rf_new = study_rf.best_value
 
   if best_value_rf_new is not None and (best_value_rf is None or best_value_rf_new < best_value_rf):
     best_pipeline_rf = get_pipline_rf(study_rf.best_params)
-
     logger.info(f'new best value found: {best_value_rf_new}')
   else:
     logger.info('No better model found...')
     best_pipeline_rf = get_pipline_rf(study_rf.best_params)
-
 
   print('Starting finding optimized hyper-parameters for SVM...')
   study_svm_name = f'study_svm_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
@@ -587,6 +585,5 @@ def main(argv):
   test_all(best_pipeline_rf, best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
   #test_svm(best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
   
-
 if __name__ == "__main__":
     main(sys.argv[1:])
