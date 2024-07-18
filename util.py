@@ -10,6 +10,8 @@ import pickle
 from sklearn.feature_selection import SelectKBest
 from sklearn.feature_selection import f_regression
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.base import BaseEstimator, TransformerMixin
 yfin.pdr_override()
 
 NUMBER_RECENT_SECONDS = 72000
@@ -323,30 +325,42 @@ def load_pkl(file):
     return pickle.load(f)
   
 
-def get_pipline_rf(best_params):
+class TruncationTransformer(BaseEstimator, TransformerMixin):
+  def __init__(self, k):
+    self.k = k
+
+  def fit(self, X, y=None):
+    # Since this transformer is stateless, the fit method only needs to pass
+    return self
+
+  def transform(self, X, y=None):
+    return X[:, :self.k]
+
+def get_pipline_rf(params):
   pipeline = Pipeline([
-          ('truncate', SelectKBest(f_regression, k=best_params['k'])), # Adjust 'k' as needed
+          ('truncate', TruncationTransformer(k=params['k'])), # Adjust 'k' as needed
           ('regress', SafeRandomForestRegressor(
-            n_estimators=best_params['n_estimators'],
-            max_depth=best_params['max_depth'],
-            min_samples_split=best_params['min_samples_split'],
-            min_samples_leaf=best_params['min_samples_leaf'],
-            max_features=best_params['max_features'],
-            bootstrap=best_params['bootstrap'],
-            max_leaf_nodes=best_params['max_leaf_nodes'],
+            n_estimators=params['n_estimators'],
+            max_depth=params['max_depth'],
+            min_samples_split=params['min_samples_split'],
+            min_samples_leaf=params['min_samples_leaf'],
+            max_features=params['max_features'],
+            bootstrap=params['bootstrap'],
+            max_leaf_nodes=params['max_leaf_nodes'],
             timeout=TIMEOUT
       ))])
   
   return pipeline
 
 
-def get_pipline_svr(best_params):
+def get_pipline_svr(params):
   pipeline = Pipeline([
-          ('truncate', SelectKBest(f_regression, k=best_params['k'])), # Adjust 'k' as needed
+          ('scaler', StandardScaler()),  # Add scaler here
+          ('truncate', TruncationTransformer(k=params['k'])), # Adjust 'k' as needed
           ('regress', SafeSVR(
-            C=best_params['C'], 
-            epsilon=best_params['epsilon'], kernel=best_params['kernel'],
-            gamma=best_params['gamma'], timeout=TIMEOUT
+            C=params['C'], 
+            epsilon=params['epsilon'], kernel=params['kernel'],
+            gamma=params['gamma'], timeout=TIMEOUT
       ))])
   
   return pipeline

@@ -136,6 +136,17 @@ def main(argv):
   with open(f'{data_dir}/valid_tickers.txt', 'r') as f:
       valid_tickers = f.readlines()
 
+  logger.info(f'Data preparation finished, found {len(valid_tickers)} assets with enough data.')
+  feature_file_path = '../processed_data_128/features.txt'
+  # Read the text file and convert the contents back to a numpy array
+  with open(feature_file_path, 'r') as file:
+    sorted_features = np.array(file.read().split('\n'))
+
+    # iterate all tickers, reorder the features based on the scores by descending order
+    for i in range(len(valid_tickers)):
+      df_train_X_all[i] = df_train_X_all[i][sorted_features]
+      df_test_X_all[i] = df_test_X_all[i][sorted_features]
+
   # You can load it back into memory with the following code
   mysql_url = "mysql://root@192.168.2.34:3306/mysql"
   n_columns = len(df_train_X_all[0].columns)
@@ -154,10 +165,6 @@ def main(argv):
 
   best_pipeline_rf = get_pipline_rf(study_rf.best_params)
   best_pipeline_svr = get_pipline_svr(study_svm.best_params)
-
-
-
-
 
   mse_rf = []
   all_errors = None
@@ -233,8 +240,8 @@ def main(argv):
   for index, ticker_name in enumerate(final_tickers):
     adjusted_weight = adjusted_weights[index]
     if adjusted_weight > 0:
-        logger.info(f'index: {index} {ticker_name}: weight {adjusted_weight} exp profit: {exp_profits[index]}, variance: {S[ticker_name][ticker_name]}')
-        tickers_to_buy.append(ticker_name)
+      logger.info(f'index: {index} {ticker_name}: weight {adjusted_weight} exp profit: {exp_profits[index]}, variance: {S[ticker_name][ticker_name]}')
+      tickers_to_buy.append(ticker_name)
 
   logger.info(f'expected return in {period} trading days: {portfolio_return(adjusted_weights, mu)}')
   logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(adjusted_weights, S)}')

@@ -114,18 +114,6 @@ def save_data(data_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X
   save_pkl(df_test_y_all, f'{data_dir}/df_test_y_all.pkl')
 
 
-class TruncationTransformer(BaseEstimator, TransformerMixin):
-  def __init__(self, k):
-    self.k = k
-
-  def fit(self, X, y=None):
-    # Since this transformer is stateless, the fit method only needs to pass
-    return self
-
-  def transform(self, X, y=None):
-    return X[:, :self.k]
-
-
 def objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all):
   # Define the hyperparameter configuration space
   k = trial.suggest_int('k', 5, len(df_train_X_all[0].columns))
@@ -137,23 +125,12 @@ def objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all
   bootstrap = trial.suggest_categorical('bootstrap', [True, False])
   max_leaf_nodes = trial.suggest_int('max_leaf_nodes', 6, 200)
 
-
-  # Model setup
-  model = SafeRandomForestRegressor(
-      n_estimators=n_estimators,
-      max_depth=max_depth,
-      min_samples_split=min_samples_split,
-      min_samples_leaf=min_samples_leaf,
-      max_features=max_features,
-      bootstrap=bootstrap,
-      max_leaf_nodes=max_leaf_nodes,
-      timeout=TIMEOUT
-  )
-
-  pipeline = Pipeline([
-      ('truncate', TruncationTransformer(k=k)),
-      ('regress', model),
-  ])
+  params = {"n_estimators": n_estimators, "max_depth": max_depth, \
+            "min_samples_split": min_samples_split, \
+              "min_samples_leaf": min_samples_leaf, "max_features": max_features, \
+                "bootstrap": bootstrap, "max_leaf_nodes": max_leaf_nodes, "k": k}
+  
+  pipeline = get_pipline_rf(params)
 
   total_mses = 0
   try:
@@ -186,13 +163,17 @@ def objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all):
   gamma = trial.suggest_float('gamma', 1e-4, 1e1, log=True)
 
   # Model setup
-  model = SafeSVR(C=C,  kernel=kernel, gamma=gamma, epsilon=epsilon, timeout=TIMEOUT)
+  params = {"C": C, "kernel": kernel, "gamma": gamma, "epsilon": epsilon, "k": k}
+   
 
-  pipeline = Pipeline([
-      ('scaler', StandardScaler()),  # Add scaler here
-      ('truncate', TruncationTransformer(k=k)),
-      ('svr', model),
-  ])
+  # model = SafeSVR(C=C,  kernel=kernel, gamma=gamma, epsilon=epsilon, timeout=TIMEOUT)
+
+  # pipeline = Pipeline([
+  #     ('scaler', StandardScaler()),  # Add scaler here
+  #     ('truncate', TruncationTransformer(k=k)),
+  #     ('svr', model),
+  # ])
+  pipeline = get_pipline_svr(params)
 
   total_mses = 0
   try:
@@ -216,39 +197,7 @@ def objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all):
       # Return a large MSE value to penalize this result
       return float('inf')
 
-def save_rf(best_params, model_dir):
-  # get current date
-  os.makedirs(model_dir, exist_ok=True)
 
-  best_pipeline = Pipeline([
-          ('truncate', SelectKBest(f_regression, k=best_params['k'])), # Adjust 'k' as needed
-          ('regress', SafeRandomForestRegressor(
-            n_estimators=best_params['n_estimators'],
-            max_depth=best_params['max_depth'],
-            min_samples_split=best_params['min_samples_split'],
-            min_samples_leaf=best_params['min_samples_leaf'],
-            max_features=best_params['max_features'],
-            bootstrap=best_params['bootstrap'],
-            max_leaf_nodes=best_params['max_leaf_nodes'],
-            timeout=TIMEOUT
-      ))])
-  # Save to file in the current working directory
-  with open(f"{model_dir}/best_pipeline_rf.pkl", "wb") as file:  
-      pickle.dump(best_pipeline, file)
-  return best_pipeline
-
-
-
-
-def save_model(pipeline, model_dir, model_name):
-  # get current date
-  os.makedirs(model_dir, exist_ok=True)
-
-
-  # Save to file in the current working directory
-  with open(f"{model_dir}/{model_name}", "wb") as file:  
-      pickle.dump(pipeline, file)
-  return pipeline
 
 def test_naive(valid_tickers, df_test_X_all, df_test_y_all, period):
   naive_mses_1 = []
