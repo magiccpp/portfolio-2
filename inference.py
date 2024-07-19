@@ -36,7 +36,7 @@ ANNUAL_TRADING_DAYS = 252
 
 
 
-def get_predict_X(stock_name, start='2018-01-01'):        
+def get_predict_X(stock_name, sorted_features, start='2018-01-01'):        
   df = load_latest_price_data(stock_name)
   df, feature_columns = add_features(df, 10)
   timestamp = df.index[0]
@@ -55,7 +55,7 @@ def get_predict_X(stock_name, start='2018-01-01'):
   df, _ = remove_nan(df, type='top')
   df_predict_X = df[feature_columns]
   
-  return df_predict_X
+  return df_predict_X[sorted_features]
 
 def portfolio_volatility_log_return(weights, covariance):
     return np.sqrt(np.dot(weights.T, np.dot(covariance, weights)))
@@ -142,10 +142,10 @@ def main(argv):
   with open(feature_file_path, 'r') as file:
     sorted_features = np.array(file.read().split('\n'))
 
-    # iterate all tickers, reorder the features based on the scores by descending order
-    for i in range(len(valid_tickers)):
-      df_train_X_all[i] = df_train_X_all[i][sorted_features]
-      df_test_X_all[i] = df_test_X_all[i][sorted_features]
+  # iterate all tickers, reorder the features based on the scores by descending order
+  for i in range(len(valid_tickers)):
+    df_train_X_all[i] = df_train_X_all[i][sorted_features]
+    df_test_X_all[i] = df_test_X_all[i][sorted_features]
 
   # You can load it back into memory with the following code
   mysql_url = "mysql://root@192.168.2.34:3306/mysql"
@@ -170,13 +170,10 @@ def main(argv):
   all_errors = None
 
   # the mean of standard deviation of predictions, mean_var_predictions[0] is a number indicating the mean of variance of predictions of the first stock
-  mean_var_predictions = []
   # the multiplier which is cov(var_predictions, mse)/var(std_predictions)
   # during inferencing, the conditional expected error is calculated with:
   # E[errors|std_predictions=std] = mean_errors[i] + multiplier*(std-mean_std_predictions[i]) when 
-  multiplier = []
   exp_profits = []
-  predict_stds = []
   final_tickers = []
   for i in range(len(valid_tickers)):
     stock_name = valid_tickers[i].strip()
@@ -198,7 +195,7 @@ def main(argv):
       y_pred_svr = best_pipeline_svr.predict(X_test)
       y_pred = (y_pred_rf + y_pred_svr) / 2
 
-      df_predict_X = get_predict_X(stock_name)
+      df_predict_X = get_predict_X(stock_name, sorted_features)
       
       X_predict = df_predict_X.copy().values
 
