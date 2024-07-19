@@ -137,7 +137,7 @@ def main(argv):
       valid_tickers = f.readlines()
 
   logger.info(f'Data preparation finished, found {len(valid_tickers)} assets with enough data.')
-  feature_file_path = '../processed_data_128/features.txt'
+  feature_file_path = './processed_data_128/features.txt'
   # Read the text file and convert the contents back to a numpy array
   with open(feature_file_path, 'r') as file:
     sorted_features = np.array(file.read().split('\n'))
