@@ -27,7 +27,7 @@ import logging
 import getopt
 import sys
 from sklearn.preprocessing import FunctionTransformer
-from sklearn.base import BaseEstimator, TransformerMixin
+
 
 logger = logging.getLogger('training')
 logger.setLevel(logging.DEBUG)  # Set the logging level
