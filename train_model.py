@@ -27,6 +27,7 @@ import logging
 import getopt
 import sys
 from sklearn.preprocessing import FunctionTransformer
+from util import load_pkl
 
 
 logger = logging.getLogger('training')
@@ -245,6 +246,7 @@ def test_naive(valid_tickers, df_test_X_all, df_test_y_all, period):
 def test_all(best_pipeline_svm, best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all):
   mses_rf = []
   mses_svm = []
+  mses_naive = []
   mses = []
   all_errors = None
   for i in range(len(valid_tickers)):
@@ -266,8 +268,14 @@ def test_all(best_pipeline_svm, best_pipeline_rf, valid_tickers, df_train_X_all,
     best_pipeline_rf.fit(X_train, y_train)
     y_pred_rf = best_pipeline_rf.predict(X_test)
 
+    # compute the naive prediction
+    period = 128
+    divisor = 512 / period
+    df_test_X_naive = pd.concat((df_train_X[-512:], df_test_X))
+    y_pred_naive = df_test_X_naive[f'log_price_diff_512'].rolling(window=512).mean()[512:] / divisor
+
     # y_pred is the average of the two predictions
-    y_pred = (y_pred_svm + y_pred_rf) / 2
+    y_pred = (y_pred_svm + y_pred_rf + y_pred_naive) / 3
 
     df_error = pd.DataFrame(y_pred - y_test, index=df_test_y.index, columns=[stock_name])
     if all_errors is None:
@@ -278,20 +286,21 @@ def test_all(best_pipeline_svm, best_pipeline_rf, valid_tickers, df_train_X_all,
 
     mse_rf = mean_squared_error(y_test, y_pred_rf)
     mse_svm = mean_squared_error(y_test, y_pred_svm)
+    mse_naive = mean_squared_error(y_test, y_pred_naive)
     mse = mean_squared_error(y_test, y_pred)
 
-    logger.debug(f'{stock_name} MSE RF: {mse_rf}, MSE SVM: {mse_svm}, MSE Ensemble: {mse}')
+    logger.debug(f'{stock_name} MSE RF: {mse_rf}, MSE SVM: {mse_svm}, MSE Naive: {mse_naive}, MSE Ensemble: {mse}')
 
     mses_rf.append(mse_rf)
     mses_svm.append(mse_svm)
+    mses_naive.append(mse_naive)
     mses.append(mse)
 
   logger.info(f'MSE of RF: avg: {np.mean(mses_rf)}, std: {np.std(mses_rf)}')
   logger.info(f'MSE of SVM: avg: {np.mean(mses_svm)}, std: {np.std(mses_svm)}')
+  logger.info(f'MSE of Naive (512 days average): avg: {np.mean(mses_naive)}, std: {np.std(mses_naive)}')
   logger.info(f'Ensemble: avg: {np.mean(mses)}, std: {np.std(mses)}')
   
-
-    
 
 def test_rf(best_pipeline, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all):
   mse_rf = []
