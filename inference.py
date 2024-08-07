@@ -37,11 +37,11 @@ ANNUAL_TRADING_DAYS = 252
 
 
 def get_predict_X(stock_name, sorted_features, start='2018-01-01'):        
-  df = load_latest_price_data(stock_name)
+  df = load_latest_price_data(stock_name, start)
   df, feature_columns = add_features(df, 10)
-  timestamp = df.index[0]
-  earliest_date = timestamp.strftime('%Y-%m-%d')
-  start = earliest_date
+  # timestamp = df.index[0]
+  # earliest_date = timestamp.strftime('%Y-%m-%d')
+  # start = earliest_date
   end = None
 
   df, columns = merge_fred(df, 'M2SL', 6, start, end, 4, 2, if_log=True)
@@ -193,16 +193,25 @@ def main(argv):
       best_pipeline_svr.fit(X_train, y_train)
       y_pred_rf = best_pipeline_rf.predict(X_test)
       y_pred_svr = best_pipeline_svr.predict(X_test)
-      y_pred = (y_pred_rf + y_pred_svr) / 2
+      
+      # compute the naive prediction
+      period = 128
+      divisor = 512 / period
+      df_test_X_naive = pd.concat((df_train_X[-512:], df_test_X))
+      y_pred_naive = (df_test_X_naive[f'log_price_diff_512'].rolling(window=512).mean()[512:] / divisor).to_numpy()
+      
+      print(f"length: y_pred_naive: {len(y_pred_naive)}, y_pred_rf: {len(y_pred_rf)}, y_pred_svr: {len(y_pred_svr)}")
+      y_pred = (y_pred_rf + y_pred_svr + y_pred_naive) / 3
 
       df_predict_X = get_predict_X(stock_name, sorted_features)
       
       X_predict = df_predict_X.copy().values
 
-      y_pred_2_rf = best_pipeline_rf.predict(X_predict)
-      y_pred_2_svr = best_pipeline_svr.predict(X_predict)
-      y_pred_2 = (y_pred_2_rf + y_pred_2_svr) / 2
-
+      y_pred_2_rf = best_pipeline_rf.predict(X_predict)[512:]
+      y_pred_2_svr = best_pipeline_svr.predict(X_predict)[512:]
+      y_pred_2_naive = df_predict_X[f'log_price_diff_512'].rolling(window=512).mean()[512:] / divisor
+      y_pred_2 = (y_pred_2_rf + y_pred_2_svr + y_pred_2_naive) / 3
+      print(f"length: y_pred_2_naive: {len(y_pred_2_naive)}, y_pred_2_rf: {len(y_pred_2_rf)}, y_pred_2_svr: {len(y_pred_2_svr)}")
     except Exception as e:
       logger.error(f'Error in predicting {stock_name}: {e}')
       continue
@@ -223,7 +232,18 @@ def main(argv):
     mse_rf.append(mse)
     final_tickers.append(stock_name)
 
-  S = get_shrinkage_covariance(all_errors.fillna(method='ffill').fillna(method='bfill'))
+  all_errors = all_errors.fillna(method='ffill').fillna(method='bfill')
+  # Check for remaining NaNs
+  nan_counts = all_errors.isna().sum()
+
+  # Display columns with NaNs
+  print(nan_counts[nan_counts > 0])
+
+  # Display rows with NaNs
+  print(all_errors[all_errors.isna().any(axis=1)])
+
+
+  S = get_shrinkage_covariance(all_errors)
   #S = all_errors.cov()
   #S = CovarianceShrinkage(all_errors).ledoit_wolf()
   mu = exp_profits
