@@ -9,6 +9,7 @@ import getopt
 import sys
 import optuna
 from util import save_pkl, get_pipline_svr, get_pipline_rf
+import json
 
 logger = logging.getLogger('inference')
 logger.setLevel(logging.DEBUG)  # Set the logging level
@@ -193,7 +194,7 @@ def main(argv):
       best_pipeline_svr.fit(X_train, y_train)
       y_pred_rf = best_pipeline_rf.predict(X_test)
       y_pred_svr = best_pipeline_svr.predict(X_test)
-      
+
       # compute the naive prediction
       period = 128
       divisor = 512 / period
@@ -258,10 +259,16 @@ def main(argv):
     adjusted_weight = adjusted_weights[index]
     if adjusted_weight > 0:
       logger.info(f'index: {index} {ticker_name}: weight {adjusted_weight} exp profit: {exp_profits[index]}, variance: {S[ticker_name][ticker_name]}')
-      tickers_to_buy.append(ticker_name)
+      ticker_info = {'id': ticker_name, 'weight': adjusted_weight}
+      tickers_to_buy.append(ticker_info)
 
   logger.info(f'expected return in {period} trading days: {portfolio_return(adjusted_weights, mu)}')
   logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(adjusted_weights, S)}')
+
+  # print tickers_to_buy in JSON format
+
+  tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
+  print(tickers_to_buy_json)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
