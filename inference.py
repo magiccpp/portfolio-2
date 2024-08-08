@@ -33,7 +33,7 @@ logger.addHandler(console_handler)
 
 INTEREST_RATE = 0.0497    # Current interest rate accessible for USD
 ANNUAL_TRADING_DAYS = 252
-
+MAX_RISK = 0.08
 
 
 
@@ -61,32 +61,55 @@ def get_predict_X(stock_name, sorted_features, start='2018-01-01'):
 def portfolio_volatility_log_return(weights, covariance):
     return np.sqrt(np.dot(weights.T, np.dot(covariance, weights)))
 
-def portfolio_log_return(weights, returns):
-    return np.sum(returns*weights)
+def portfolio_log_return(weights, returns, allow_short=False):
+    return np.sum(np.abs(returns)*weights) if allow_short else np.sum(returns*weights)
 
 def portfolio_volatility(weights, covariance_log_returns):
     covariance_returns = np.exp(covariance_log_returns) - 1
     return np.sqrt(np.dot(weights.T, np.dot(covariance_returns, weights)))
 
-def portfolio_return(weights, log_returns):
+def portfolio_return(weights, log_returns, allow_short=False):
     returns = np.exp(log_returns) - 1
-    return np.sum(returns*weights)
+    return np.sum(np.abs(returns)*weights) if allow_short else np.sum(returns*weights)
 
-def min_func_sharpe(weights, returns, covariance, risk_free_rate):
-    portfolio_ret = portfolio_log_return(weights, returns)
+def min_func_sharpe(weights, returns, covariance, risk_free_rate, allow_short=False):
+    portfolio_ret = portfolio_log_return(weights, returns, allow_short)
     portfolio_vol = portfolio_volatility_log_return(weights, covariance)
     sharpe_ratio = (portfolio_ret - risk_free_rate) / portfolio_vol
-    return -sharpe_ratio  # Negate Sharpe ratio because we minimize the function
+    #return -sharpe_ratio # Negate Sharpe ratio because we minimize the function
+    return - (portfolio_ret - 2 * portfolio_vol)
 
-def optimize_portfolio(returns, covariance, risk_free_rate):
+def optimize_portfolio(returns, covariance, risk_free_rate, allow_short=False):
     num_assets = len(returns)
     args = (returns, covariance, risk_free_rate)
-    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
-    bound = (0.0,0.15)
-    bounds = tuple(bound for asset in range(num_assets))
-    result = minimize(min_func_sharpe, num_assets*[1./num_assets,], args=args,
-                                method='SLSQP', bounds=bounds, constraints=constraints)
+
+    # Define constraints
+    def constraint_sum(weights):
+        return np.sum(weights) - 1
+    
+    constraints = [{'type': 'eq', 'fun': constraint_sum}]
+
+    bounds = tuple((0.0, 0.20) for _ in range(num_assets))
+
+    # Perform optimization
+    def objective(weights):
+        return min_func_sharpe(weights, returns, covariance, risk_free_rate, allow_short)
+    
+    iteration = [0]  # mutable container to store iteration count
+    def callback(weights):
+        iteration[0] += 1
+        
+        print(f"Iteration: {iteration[0]}, value: {objective(weights)}")
+
+    # Initial guess (equal weights)
+    initial_guess = num_assets * [1. / num_assets]
+
+    # Perform optimization
+    result = minimize(objective, initial_guess, 
+                      method='SLSQP', bounds=bounds, constraints=constraints, callback=callback, options={'maxiter': 100})
+
     return result
+
 
 def get_shrinkage_covariance(df):
     lw = LedoitWolf(store_precision=False, assume_centered=True)
@@ -95,17 +118,28 @@ def get_shrinkage_covariance(df):
     shrink_cov = pd.DataFrame(lw.covariance_, index=df.columns, columns=df.columns)
     return shrink_cov
 
-def adjust_weights(weights, threshold=0.05):
-    new_weights = np.array(weights)
-    # Identify weights below the threshold
-    below_threshold = weights < threshold
-    # Set these weights to 0
-    new_weights[below_threshold] = 0
-    # Compute the deficit (i.e., how much we are currently missing to get to a total of 1)
-    deficit = 1 - np.sum(new_weights)
-    # Spread this deficit equally among the remaining stocks (i.e., the ones with weights > 0.05)
-    new_weights[~below_threshold] += deficit / np.sum(~below_threshold)
-    return new_weights
+
+def do_optimization(mu, S, final_tickers, period, allow_short):
+  riskfree_log_return = np.log(1 + INTEREST_RATE) * period / ANNUAL_TRADING_DAYS
+  raw_weights = optimize_portfolio(mu, S, riskfree_log_return, allow_short)
+  weights = raw_weights.x
+  
+  tickers_to_buy = []
+  logger.info(f'Starting optimization: allow_short: {allow_short}')
+  for index, ticker_name in enumerate(final_tickers):
+    weight = weights[index]
+    if weight > 1e-3:
+      logger.info(f'index: {index} {ticker_name}: weight {weight} exp profit: {mu[index]}, variance: {S[ticker_name][ticker_name]}')
+      ticker_info = {'id': ticker_name, 'weight': weight}
+      tickers_to_buy.append(ticker_info)
+
+  logger.info(f'expected return in {period} trading days: {portfolio_return(weights, mu)}')
+  logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(weights, S)}')
+  logger.info(f'optimization finished for allow_short={allow_short}')
+  # print tickers_to_buy in JSON format
+
+  tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
+  print(tickers_to_buy_json)
 
 
 def main(argv):
@@ -243,32 +277,23 @@ def main(argv):
   # Display rows with NaNs
   print(all_errors[all_errors.isna().any(axis=1)])
 
-
   S = get_shrinkage_covariance(all_errors)
   #S = all_errors.cov()
   #S = CovarianceShrinkage(all_errors).ledoit_wolf()
   mu = exp_profits
 
-  riskfree_log_return = np.log(1 + INTEREST_RATE) * period / ANNUAL_TRADING_DAYS
-  raw_weights = optimize_portfolio(mu, S, riskfree_log_return)
+  # to save S and mu
+  S.to_pickle(f'{data_dir}/S.pkl')
+  np.save(f'{data_dir}/mu.npy', np.array(mu))
 
-  adjusted_weights = adjust_weights(raw_weights.x)
-  tickers_to_buy = []
+  # save final tickers:
+  with open(f'{data_dir}/final_tickers.txt', 'w') as f:
+    for ticker in final_tickers:
+      f.write(f'{ticker}\n')
 
-  for index, ticker_name in enumerate(final_tickers):
-    adjusted_weight = adjusted_weights[index]
-    if adjusted_weight > 0:
-      logger.info(f'index: {index} {ticker_name}: weight {adjusted_weight} exp profit: {exp_profits[index]}, variance: {S[ticker_name][ticker_name]}')
-      ticker_info = {'id': ticker_name, 'weight': adjusted_weight}
-      tickers_to_buy.append(ticker_info)
+  do_optimization(mu, S, final_tickers, period, allow_short=False)
+  do_optimization(mu, S, final_tickers, period, allow_short=True)
 
-  logger.info(f'expected return in {period} trading days: {portfolio_return(adjusted_weights, mu)}')
-  logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(adjusted_weights, S)}')
-
-  # print tickers_to_buy in JSON format
-
-  tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
-  print(tickers_to_buy_json)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
