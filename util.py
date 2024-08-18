@@ -159,7 +159,8 @@ def add_features(df, n_features):
 currency_mapping = {
   '.ST': 'SEK',
   '.DE': 'EUR',
-  '.L': 'GBP'
+  '.L': 'GBP',
+  '.SS': 'RMB'
 }
 
 # Map currency pairs to directions
@@ -167,6 +168,7 @@ conversion_mapping = {
   ('SEK', 'USD'): ('DEXSDUS', True, 'SEK=X'),
   ('EUR', 'USD'): ('DEXUSEU', False, 'EURUSD=X'),
   ('GBP', 'USD'): ('DEXUSUK', False, 'GBPUSD=X'),
+  ('RMB', 'USD'): ('DEXCHUS', True, 'CNY=X')
 }
 
 def get_currency_pair(stock_suffix, base_currency):
@@ -223,10 +225,9 @@ def load_latest_price_data(stock_name, start='1950-01-01', end=None):
   else:
     seconds = NUMBER_RECENT_SECONDS
 
-
   if not is_file_downloaded_recently(file_path, seconds=seconds):
     print('Preparing downloading:', stock_name)
-    data = pdr.get_data_yahoo(stock_name, start=start, end=None)
+    data = pdr.get_data_yahoo(stock_name, start=start, end=None, timeout=40)
     
     if len(data) > 100:
       data.to_csv(file_path)
@@ -245,13 +246,13 @@ def load_latest_price_data(stock_name, start='1950-01-01', end=None):
 
 
 def   get_X_y_by_stock(stock_name, period, start, end, split_date):
-  print(f'processing {stock_name}...')
   try:
     df = load_latest_price_data(stock_name, start=start, end=end)
   except FileNotFoundError:
     print(f'Cannot find data for: {stock_name}')
     return None, None, None, None
   
+  print(f'processing {stock_name}...')
   if df is None or len(df) < MIN_TOTAL_DATA_PER_STOCK:
     print(f'Cannot find enough data for: {stock_name}')
     return None, None, None, None
@@ -285,11 +286,11 @@ def   get_X_y_by_stock(stock_name, period, start, end, split_date):
 
   df, _ = remove_nan(df, type='top')
   if len(df) < MIN_TOTAL_DATA_PER_STOCK:
-    print(f'Cannot find enough data for: {stock_name}')
+    print(f'Cannot find enough data for: {stock_name} after removing nan from the top')
     return None, None, None, None
   df, _ = remove_nan(df, type='bottom')
   if len(df) < MIN_TOTAL_DATA_PER_STOCK:
-    print(f'Cannot find enough data for: {stock_name}')
+    print(f'Cannot find enough data for: {stock_name} after removing nan from the bottom')
     return None, None, None, None
   
   df = df[feature_columns + ['log_predict']]

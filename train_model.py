@@ -58,7 +58,7 @@ TIMEOUT = 120
 # number of trials to do the hyper-parameter optimization
 N_TRIALS = 50
 
-tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt')
+tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('ssec.txt')
 selected_tickers = tickers
 
 
@@ -424,7 +424,7 @@ def main(argv):
       # delete: delete the previous study
       opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "iter=", "reload", "delete"])
   except getopt.GetoptError:
-    logger.error('usage: train_model.py --period <days> --iter <iterations> --reload --delete')
+    logger.error('usage: python train_model.py --period <days> --iter <iterations> --reload --delete')
     sys.exit(2)
 
   reload_data = False

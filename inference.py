@@ -277,6 +277,11 @@ def main(argv):
   # Display rows with NaNs
   print(all_errors[all_errors.isna().any(axis=1)])
 
+  df_error_0 = pd.DataFrame(0, index=all_errors.index, columns=['USD'])
+  all_errors = pd.concat([all_errors, df_error_0], axis=1, join='outer')
+  exp_profits.append(0)
+  final_tickers.append('USD')
+
   S = get_shrinkage_covariance(all_errors)
   #S = all_errors.cov()
   #S = CovarianceShrinkage(all_errors).ledoit_wolf()
