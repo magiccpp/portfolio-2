@@ -10,6 +10,7 @@ import sys
 import optuna
 from util import save_pkl, get_pipline_svr, get_pipline_rf
 import json
+import torch
 
 logger = logging.getLogger('inference')
 logger.setLevel(logging.DEBUG)  # Set the logging level
@@ -142,6 +143,104 @@ def do_optimization(mu, S, final_tickers, period, allow_short):
   print(tickers_to_buy_json)
 
 
+# using pytorch to do optimization
+# Defining the objective function and constraints
+def portfolio_variance(weights, mu_tensor, S_tensor):
+    return torch.dot(weights.T, torch.matmul(S_tensor, weights))
+
+def optimize_portfolio(mean, mu_tensor, S_tensor, num_assets, bounds_tensor):
+    # Initial guess
+    weights = torch.full((num_assets,), 1 / num_assets, dtype=torch.float32, requires_grad=True)
+
+    optimizer = torch.optim.Adam([weights], lr=0.01)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=100, verbose=True)
+
+    for _ in range(3000):  # Number of iterations
+        optimizer.zero_grad()
+
+        var = portfolio_variance(weights, mu_tensor, S_tensor)
+        mean_return = torch.dot(weights, mu_tensor)
+        constraint_loss = (mean_return - mean) ** 2
+        unit_sum_constraint = (torch.sum(weights) - 1) ** 2
+        loss = var + constraint_loss + unit_sum_constraint
+        loss.backward()
+
+        # Applying bounds
+        with torch.no_grad():
+            weights.clamp_(bounds_tensor[:, 0], bounds_tensor[:, 1])
+
+        optimizer.step()
+        scheduler.step(loss)
+
+    return weights.detach().numpy()
+
+
+
+def do_optimization_2(mu_all, S_all, final_tickers_all, risk_free_rate, period, country='all'):
+  if country == 'all':
+    idx = [i for i, ticker in enumerate(final_tickers_all)]
+  elif country == 'us':
+    # get the index of the stocks without suffix
+    idx = [i for i, ticker in enumerate(final_tickers_all) if "." not in ticker]
+  elif country == 'uk':
+    idx = [i for i, ticker in enumerate(final_tickers_all) if ".L" in ticker]
+  elif country == 'germany':
+    idx = [i for i, ticker in enumerate(final_tickers_all) if ".DE" in ticker]
+  elif country == 'sweden':
+    idx = [i for i, ticker in enumerate(final_tickers_all) if ".ST" in ticker]
+  else:
+    logger.error(f'Country {country} is not supported')
+    return
+  
+  mu = np.array(mu_all)[idx]
+  S = S_all.iloc[idx, idx]
+  final_tickers = [final_tickers_all[i] for i in idx]
+  S_tensor = torch.tensor(S.values, dtype=torch.float32)
+  # Assuming 'mu' is a NumPy array
+  mu_tensor = torch.tensor(mu, dtype=torch.float32)
+  num_assets = len(mu)
+  bounds = np.array([(0, 0.2)] * num_assets, dtype=np.float32)
+  bounds_tensor = torch.tensor(bounds, dtype=torch.float32)
+
+  efficient_means = np.linspace(-0.1, 0.3, 32)  # Custom range of target returns for the efficient frontier
+
+  # Run optimization sequentially
+  efficient_portfolios = []
+
+  for mean in efficient_means:
+      print(f'Optimizing for target mean return: {mean}')
+      result = optimize_portfolio(mean, mu_tensor, S_tensor, num_assets, bounds_tensor)
+      efficient_portfolios.append(result)
+
+  # Convert portfolios to Torch tensors and calculate portfolio variances
+  efficient_risks = [portfolio_variance(torch.tensor(portfolio, dtype=torch.float32), mu_tensor, S_tensor).sqrt().item() for portfolio in efficient_portfolios]
+
+  # Print out results
+  for i, (risk, mean_return) in enumerate(zip(efficient_risks, efficient_means)):
+      print(f'Portfolio {i+1}: Target Mean Return = {mean_return:.4f}, Standard Deviation = {risk:.4f}')
+
+    # Calculate Sharpe Ratios for efficient portfolios
+  sharpe_ratios = [(y - risk_free_rate) / x for x, y in zip(efficient_risks, efficient_means)]
+  max_sharpe_idx = np.argmax(sharpe_ratios)
+
+  weights = efficient_portfolios[max_sharpe_idx]
+
+  tickers_to_buy = []
+  for index, ticker_name in enumerate(final_tickers):
+    weight = float(weights[index])
+    if weight > 1e-3:
+      logger.info(f'index: {index} {ticker_name}: weight {weight} exp profit: {mu[index]}, variance: {S[ticker_name][ticker_name]}')
+      ticker_info = {'id': ticker_name, 'weight': weight}
+      tickers_to_buy.append(ticker_info)
+
+  logger.info(f'expected return in {period} trading days: {portfolio_return(weights, mu)}')
+  logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(weights, S)}')
+  # print tickers_to_buy in JSON format
+
+  tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
+  print(tickers_to_buy_json)
+
+
 def main(argv):
   logger.info('training started...')
   period = None
@@ -210,6 +309,9 @@ def main(argv):
   # E[errors|std_predictions=std] = mean_errors[i] + multiplier*(std-mean_std_predictions[i]) when 
   exp_profits = []
   final_tickers = []
+
+
+
   for i in range(len(valid_tickers)):
     stock_name = valid_tickers[i].strip()
     df_train_X = df_train_X_all[i]
@@ -277,10 +379,10 @@ def main(argv):
   # Display rows with NaNs
   print(all_errors[all_errors.isna().any(axis=1)])
 
-  df_error_0 = pd.DataFrame(0, index=all_errors.index, columns=['USD'])
-  all_errors = pd.concat([all_errors, df_error_0], axis=1, join='outer')
-  exp_profits.append(0)
-  final_tickers.append('USD')
+  #df_error_0 = pd.DataFrame(0, index=all_errors.index, columns=['USD'])
+  #all_errors = pd.concat([all_errors, df_error_0], axis=1, join='outer')
+  #exp_profits.append(0)
+  #final_tickers.append('USD')
 
   S = get_shrinkage_covariance(all_errors)
   #S = all_errors.cov()
@@ -288,6 +390,7 @@ def main(argv):
   mu = exp_profits
 
   # to save S and mu
+
   S.to_pickle(f'{data_dir}/S.pkl')
   np.save(f'{data_dir}/mu.npy', np.array(mu))
 
@@ -296,8 +399,10 @@ def main(argv):
     for ticker in final_tickers:
       f.write(f'{ticker}\n')
 
-  do_optimization(mu, S, final_tickers, period, allow_short=False)
-  do_optimization(mu, S, final_tickers, period, allow_short=True)
+  #do_optimization(mu, S, final_tickers, period, allow_short=False)
+  #do_optimization(mu, S, final_tickers, period, allow_short=True)
+  do_optimization_2(mu, S, final_tickers, 0.02, period)
+
 
 
 if __name__ == "__main__":
