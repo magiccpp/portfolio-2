@@ -77,8 +77,8 @@ def min_func_sharpe(weights, returns, covariance, risk_free_rate, allow_short=Fa
     portfolio_ret = portfolio_log_return(weights, returns, allow_short)
     portfolio_vol = portfolio_volatility_log_return(weights, covariance)
     sharpe_ratio = (portfolio_ret - risk_free_rate) / portfolio_vol
-    #return -sharpe_ratio # Negate Sharpe ratio because we minimize the function
-    return - (portfolio_ret - 2 * portfolio_vol)
+    return -sharpe_ratio # Negate Sharpe ratio because we minimize the function
+
 
 def optimize_portfolio(returns, covariance, risk_free_rate, allow_short=False):
     num_assets = len(returns)
@@ -141,6 +141,7 @@ def do_optimization(mu, S, final_tickers, period, allow_short):
 
   tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
   print(tickers_to_buy_json)
+  return tickers_to_buy_json
 
 
 # using pytorch to do optimization
@@ -173,73 +174,6 @@ def optimize_portfolio(mean, mu_tensor, S_tensor, num_assets, bounds_tensor):
         scheduler.step(loss)
 
     return weights.detach().numpy()
-
-
-
-def do_optimization_2(mu_all, S_all, final_tickers_all, risk_free_rate, period, country='all'):
-  if country == 'all':
-    idx = [i for i, ticker in enumerate(final_tickers_all)]
-  elif country == 'us':
-    # get the index of the stocks without suffix
-    idx = [i for i, ticker in enumerate(final_tickers_all) if "." not in ticker]
-  elif country == 'uk':
-    idx = [i for i, ticker in enumerate(final_tickers_all) if ".L" in ticker]
-  elif country == 'germany':
-    idx = [i for i, ticker in enumerate(final_tickers_all) if ".DE" in ticker]
-  elif country == 'sweden':
-    idx = [i for i, ticker in enumerate(final_tickers_all) if ".ST" in ticker]
-  else:
-    logger.error(f'Country {country} is not supported')
-    return
-  
-  mu = np.array(mu_all)[idx]
-  S = S_all.iloc[idx, idx]
-  final_tickers = [final_tickers_all[i] for i in idx]
-  S_tensor = torch.tensor(S.values, dtype=torch.float32)
-  # Assuming 'mu' is a NumPy array
-  mu_tensor = torch.tensor(mu, dtype=torch.float32)
-  num_assets = len(mu)
-  bounds = np.array([(0, 0.2)] * num_assets, dtype=np.float32)
-  bounds_tensor = torch.tensor(bounds, dtype=torch.float32)
-
-  efficient_means = np.linspace(-0.1, 0.3, 32)  # Custom range of target returns for the efficient frontier
-
-  # Run optimization sequentially
-  efficient_portfolios = []
-
-  for mean in efficient_means:
-      print(f'Optimizing for target mean return: {mean}')
-      result = optimize_portfolio(mean, mu_tensor, S_tensor, num_assets, bounds_tensor)
-      efficient_portfolios.append(result)
-
-  # Convert portfolios to Torch tensors and calculate portfolio variances
-  efficient_risks = [portfolio_variance(torch.tensor(portfolio, dtype=torch.float32), mu_tensor, S_tensor).sqrt().item() for portfolio in efficient_portfolios]
-
-  # Print out results
-  for i, (risk, mean_return) in enumerate(zip(efficient_risks, efficient_means)):
-      print(f'Portfolio {i+1}: Target Mean Return = {mean_return:.4f}, Standard Deviation = {risk:.4f}')
-
-    # Calculate Sharpe Ratios for efficient portfolios
-  sharpe_ratios = [(y - risk_free_rate) / x for x, y in zip(efficient_risks, efficient_means)]
-  max_sharpe_idx = np.argmax(sharpe_ratios)
-
-  weights = efficient_portfolios[max_sharpe_idx]
-
-  tickers_to_buy = []
-  for index, ticker_name in enumerate(final_tickers):
-    weight = float(weights[index])
-    if weight > 1e-3:
-      logger.info(f'index: {index} {ticker_name}: weight {weight} exp profit: {mu[index]}, variance: {S[ticker_name][ticker_name]}')
-      ticker_info = {'id': ticker_name, 'weight': weight}
-      tickers_to_buy.append(ticker_info)
-
-  logger.info(f'expected return in {period} trading days: {portfolio_return(weights, mu)}')
-  logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(weights, S)}')
-  # print tickers_to_buy in JSON format
-
-  tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
-  print(tickers_to_buy_json)
-
 
 def main(argv):
   logger.info('training started...')
@@ -399,11 +333,11 @@ def main(argv):
     for ticker in final_tickers:
       f.write(f'{ticker}\n')
 
-  #do_optimization(mu, S, final_tickers, period, allow_short=False)
-  #do_optimization(mu, S, final_tickers, period, allow_short=True)
-  do_optimization_2(mu, S, final_tickers, 0.02, period)
-
-
+  ticket_to_buy_json = do_optimization(mu, S, final_tickers, period, allow_short=False)
+  # save the result
+  cur_date = pd.Timestamp.now().strftime('%Y%m%d')
+  with open(f'{data_dir}/computed_portfolios/tickers_to_buy_{cur_date}.json', 'w') as f:
+    f.write(ticket_to_buy_json)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
