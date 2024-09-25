@@ -11,6 +11,7 @@ import optuna
 from util import save_pkl, get_pipline_svr, get_pipline_rf
 import json
 import torch
+import os
 
 logger = logging.getLogger('inference')
 logger.setLevel(logging.DEBUG)  # Set the logging level
@@ -86,7 +87,7 @@ def optimize_portfolio(returns, covariance, risk_free_rate, allow_short=False):
 
     # Define constraints
     def constraint_sum(weights):
-        return np.sum(weights) - 1
+        return np.sum(weights) - 1 
     
     constraints = [{'type': 'eq', 'fun': constraint_sum}]
 
@@ -144,50 +145,21 @@ def do_optimization(mu, S, final_tickers, period, allow_short):
   return tickers_to_buy_json
 
 
-# using pytorch to do optimization
-# Defining the objective function and constraints
-def portfolio_variance(weights, mu_tensor, S_tensor):
-    return torch.dot(weights.T, torch.matmul(S_tensor, weights))
-
-def optimize_portfolio(mean, mu_tensor, S_tensor, num_assets, bounds_tensor):
-    # Initial guess
-    weights = torch.full((num_assets,), 1 / num_assets, dtype=torch.float32, requires_grad=True)
-
-    optimizer = torch.optim.Adam([weights], lr=0.01)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=100, verbose=True)
-
-    for _ in range(3000):  # Number of iterations
-        optimizer.zero_grad()
-
-        var = portfolio_variance(weights, mu_tensor, S_tensor)
-        mean_return = torch.dot(weights, mu_tensor)
-        constraint_loss = (mean_return - mean) ** 2
-        unit_sum_constraint = (torch.sum(weights) - 1) ** 2
-        loss = var + constraint_loss + unit_sum_constraint
-        loss.backward()
-
-        # Applying bounds
-        with torch.no_grad():
-            weights.clamp_(bounds_tensor[:, 0], bounds_tensor[:, 1])
-
-        optimizer.step()
-        scheduler.step(loss)
-
-    return weights.detach().numpy()
-
 def main(argv):
   logger.info('training started...')
   period = None
   iterations = 50
+  update_covariance = False
   try:
-      opts, args = getopt.getopt(argv, "p:", ["period="])
+      opts, args = getopt.getopt(argv, "p:u", ["period=", "update-covariance"])
   except getopt.GetoptError:
-    logger.error('usage: python inference.py --period <days>')
+    logger.error('usage: python inference.py --period=<days> --update-covariance')
     sys.exit(2)
   for opt, arg in opts:
     if opt in ("-p", "--period"):
         period = int(arg)
-
+    elif opt in ("-u", "--update-covariance"):
+       update_covariance = True
 
   if period is None:
     logger.error('usage: script.py --period <days>')
@@ -245,7 +217,8 @@ def main(argv):
   final_tickers = []
 
 
-
+  period = 128
+  divisor = 512 / period
   for i in range(len(valid_tickers)):
     stock_name = valid_tickers[i].strip()
     df_train_X = df_train_X_all[i]
@@ -260,19 +233,36 @@ def main(argv):
 
     # make the prediction
     try:
-      best_pipeline_rf.fit(X_train, y_train)
-      best_pipeline_svr.fit(X_train, y_train)
-      y_pred_rf = best_pipeline_rf.predict(X_test)
-      y_pred_svr = best_pipeline_svr.predict(X_test)
+      # check if the model exists
+      rf_model_path = f'{data_dir}/models/{stock_name}_rf.pkl'
+      svr_model_path = f'{data_dir}/models/{stock_name}_svr.pkl'
 
-      # compute the naive prediction
-      period = 128
-      divisor = 512 / period
-      df_test_X_naive = pd.concat((df_train_X[-512:], df_test_X))
-      y_pred_naive = (df_test_X_naive[f'log_price_diff_512'].rolling(window=512).mean()[512:] / divisor).to_numpy()
-      
-      print(f"length: y_pred_naive: {len(y_pred_naive)}, y_pred_rf: {len(y_pred_rf)}, y_pred_svr: {len(y_pred_svr)}")
-      y_pred = (y_pred_rf + y_pred_svr + y_pred_naive) / 3
+      if os.path.exists(rf_model_path):
+        best_pipeline_rf = load_pkl(rf_model_path)
+      else:
+        print(f"retraining rf for stock: {stock_name}")
+        best_pipeline_rf = get_pipline_rf(study_rf.best_params)
+        best_pipeline_rf.fit(X_train, y_train)
+        save_pkl(best_pipeline_rf, rf_model_path)
+
+      if os.path.exists(svr_model_path):
+        best_pipeline_svr = load_pkl(svr_model_path)
+      else:
+        print(f"retraining svr for stock: {stock_name}")
+        best_pipeline_svr = get_pipline_svr(study_svm.best_params)
+        best_pipeline_svr.fit(X_train, y_train)
+        save_pkl(best_pipeline_svr, svr_model_path)
+
+      if update_covariance:
+        y_pred_rf = best_pipeline_rf.predict(X_test)
+        y_pred_svr = best_pipeline_svr.predict(X_test)
+
+        # compute the naive prediction
+        df_test_X_naive = pd.concat((df_train_X[-512:], df_test_X))
+        y_pred_naive = (df_test_X_naive[f'log_price_diff_512'].rolling(window=512).mean()[512:] / divisor).to_numpy()
+        
+        print(f"length: y_pred_naive: {len(y_pred_naive)}, y_pred_rf: {len(y_pred_rf)}, y_pred_svr: {len(y_pred_svr)}")
+        y_pred = (y_pred_rf + y_pred_svr + y_pred_naive) / 3
 
       df_predict_X = get_predict_X(stock_name, sorted_features)
       
@@ -287,46 +277,60 @@ def main(argv):
       logger.error(f'Error in predicting {stock_name}: {e}')
       continue
     
-    df_error = pd.DataFrame(y_pred - y_test, index=df_test_y.index, columns=[stock_name])
-    if all_errors is None:
-      all_errors = df_error
-    else:
-      # concatenate the new dataframe to the existing one, column wise, use outer approach
-      all_errors = pd.concat([all_errors, df_error], axis=1, join='outer')
+    if update_covariance:
+      df_error = pd.DataFrame(y_pred - y_test, index=df_test_y.index, columns=[stock_name])
+      if all_errors is None:
+        all_errors = df_error
+      else:
+        # concatenate the new dataframe to the existing one, column wise, use outer approach
+        all_errors = pd.concat([all_errors, df_error], axis=1, join='outer')
 
-    mse = mean_squared_error(y_test, y_pred)
+      mse = mean_squared_error(y_test, y_pred)
 
     # the last prediction
     profit = y_pred_2[-1]
     exp_profits.append(profit)
-    logger.info(f'{stock_name}: exp profit={profit}, MSE={mse}')
-    mse_rf.append(mse)
+    if update_covariance:
+      logger.info(f'{stock_name}: exp profit={profit}, MSE={mse}')
+    else:
+      logger.info(f'{stock_name}: exp profit={profit}')
+
+    # mse_rf.append(mse)
     final_tickers.append(stock_name)
 
-  all_errors = all_errors.fillna(method='ffill').fillna(method='bfill')
-  # Check for remaining NaNs
-  nan_counts = all_errors.isna().sum()
+  if update_covariance:
+    all_errors = all_errors.fillna(method='ffill').fillna(method='bfill')
+    # Check for remaining NaNs
+    nan_counts = all_errors.isna().sum()
 
-  # Display columns with NaNs
-  print(nan_counts[nan_counts > 0])
+    # Display columns with NaNs
+    print(nan_counts[nan_counts > 0])
 
-  # Display rows with NaNs
-  print(all_errors[all_errors.isna().any(axis=1)])
+    # Display rows with NaNs
+    print(all_errors[all_errors.isna().any(axis=1)])
 
-  #df_error_0 = pd.DataFrame(0, index=all_errors.index, columns=['USD'])
-  #all_errors = pd.concat([all_errors, df_error_0], axis=1, join='outer')
-  #exp_profits.append(0)
-  #final_tickers.append('USD')
+    #df_error_0 = pd.DataFrame(0, index=all_errors.index, columns=['USD'])
+    #all_errors = pd.concat([all_errors, df_error_0], axis=1, join='outer')
+    #exp_profits.append(0)
+    #final_tickers.append('USD')
 
-  S = get_shrinkage_covariance(all_errors)
+    S = get_shrinkage_covariance(all_errors)
+    S.to_pickle(f'{data_dir}/S.pkl')
+  else:
+    S = load_pkl(f'{data_dir}/S.pkl')
   #S = all_errors.cov()
   #S = CovarianceShrinkage(all_errors).ledoit_wolf()
   mu = exp_profits
 
   # to save S and mu
 
-  S.to_pickle(f'{data_dir}/S.pkl')
-  np.save(f'{data_dir}/mu.npy', np.array(mu))
+  # save the result
+  cur_date = pd.Timestamp.now().strftime('%Y%m%d')
+  np.save(f'{data_dir}/mu-{cur_date}.npy', np.array(mu))
+
+  # save the all errors
+
+  all_errors.to_csv(f'{data_dir}/all_errors.csv')
 
   # save final tickers:
   with open(f'{data_dir}/final_tickers.txt', 'w') as f:
@@ -334,8 +338,7 @@ def main(argv):
       f.write(f'{ticker}\n')
 
   ticket_to_buy_json = do_optimization(mu, S, final_tickers, period, allow_short=False)
-  # save the result
-  cur_date = pd.Timestamp.now().strftime('%Y%m%d')
+
   with open(f'{data_dir}/computed_portfolios/tickers_to_buy_{cur_date}.json', 'w') as f:
     f.write(ticket_to_buy_json)
 

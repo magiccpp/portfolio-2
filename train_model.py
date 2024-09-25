@@ -243,7 +243,7 @@ def test_naive(valid_tickers, df_test_X_all, df_test_y_all, period):
   logger.info(f'The MSE of using inverse of last period as prediction: {np.mean(naive_mses_negation)}, std: {np.std(naive_mses_negation)}')
   logger.info(f'The MSE of using average of 512 days: {np.mean(naive_mses_avg_512)}, std: {np.std(naive_mses_avg_512)}')
 
-def test_all(best_pipeline_svm, best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all):
+def test_all(data_dir, best_pipeline_svm, best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all):
   mses_rf = []
   mses_svm = []
   mses_naive = []
@@ -265,8 +265,15 @@ def test_all(best_pipeline_svm, best_pipeline_rf, valid_tickers, df_train_X_all,
     best_pipeline_svm.fit(X_train, y_train)
     y_pred_svm = best_pipeline_svm.predict(X_test)
 
+    # save the model to a file
+    with open(f'{data_dir}/models/{stock_name}_svm.pkl', 'wb') as f:
+      pickle.dump(best_pipeline_svm, f)
+
     best_pipeline_rf.fit(X_train, y_train)
     y_pred_rf = best_pipeline_rf.predict(X_test)
+    # save the model to a file
+    with open(f'{data_dir}/models/{stock_name}_rf.pkl', 'wb') as f:
+      pickle.dump(best_pipeline_rf, f)
 
     # compute the naive prediction
     period = 128
@@ -540,7 +547,7 @@ def main(argv):
 
   test_naive(valid_tickers, df_test_X_all, df_test_y_all, period)
   #test_rf(best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
-  test_all(best_pipeline_rf, best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
+  test_all(data_dir, best_pipeline_rf, best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
   #test_svm(best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
   
 if __name__ == "__main__":
