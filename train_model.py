@@ -58,7 +58,7 @@ TIMEOUT = 120
 # number of trials to do the hyper-parameter optimization
 N_TRIALS = 50
 
-tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('ssec.txt')
+tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('ssec.txt') + get_tickers('cac_40.txt')
 selected_tickers = tickers
 
 
@@ -69,7 +69,7 @@ def get_mse_from_hist_average(df_X, df_y, window_size, period):
   return ((df_X[f'log_price_diff_{period}'].rolling(window=window_size).mean()[window_size:] - df_y['log_predict'][window_size:])**2).mean()
 
 
-def get_X_y(selected_tickers, period, start, end, split_date):
+def get_X_y(selected_tickers, period, start, end, split_date, force_download):
   df_train_X_all = []
   df_train_y_all = []
   df_test_X_all = []
@@ -79,7 +79,7 @@ def get_X_y(selected_tickers, period, start, end, split_date):
   mean_square_errors_5 = []
   valid_tickers = []
   for stock_name in selected_tickers:
-    df_train_X, df_train_y, df_test_X, df_test_y = get_X_y_by_stock(stock_name, period, start, end, split_date)
+    df_train_X, df_train_y, df_test_X, df_test_y = get_X_y_by_stock(stock_name, period, start, end, split_date, force_download)
     if df_train_X is None:
       continue 
     
@@ -165,8 +165,8 @@ def objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all):
 
   # Model setup
   params = {"C": C, "kernel": kernel, "gamma": gamma, "epsilon": epsilon, "k": k}
-   
-
+  
+  print('starting trying parameters: ', params)
   # model = SafeSVR(C=C,  kernel=kernel, gamma=gamma, epsilon=epsilon, timeout=TIMEOUT)
 
   # pipeline = Pipeline([
@@ -429,9 +429,9 @@ def main(argv):
   iterations = 10
   try:
       # delete: delete the previous study
-      opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "iter=", "reload", "delete"])
+      opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "svr_iter=", "rf_iter=", "reload", "delete"])
   except getopt.GetoptError:
-    logger.error('usage: python train_model.py --period <days> --iter <iterations> --reload --delete')
+    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete')
     sys.exit(2)
 
   reload_data = False
@@ -439,19 +439,24 @@ def main(argv):
   for opt, arg in opts:
     if opt in ("-p", "--period"):
         period = int(arg)
-    elif opt in ("-i", "--iter"):
-        iterations = int(arg)
+    elif opt in ("-s", "--svr_iter"):
+        svr_iterations = int(arg)
+    elif opt in ("-f", "--rf_iter"):
+        rf_iterations = int(arg)
     elif opt in ("-r", "--reload"):
         reload_data = True
     elif opt in ("-d", "--delete"):
         delete_study = True
 
   if period is None:
-    logger.error('usage: script.py --period <days> --iter <iterations>')
+    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete')
     sys.exit(2)
 
-  if iterations is None:
-    iterations = N_TRIALS
+  if svr_iterations is None:
+    svr_iterations = N_TRIALS
+
+  if rf_iterations is None:
+    rf_iterations = N_TRIALS
 
   data_dir = f'./processed_data_{period}'
   if reload_data or not if_data_exists(data_dir):
@@ -459,7 +464,7 @@ def main(argv):
     start = '1970-01-01'
     end = '2024-01-01'
     valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, mses = \
-      get_X_y(selected_tickers, period, start, end, split_date='2019-01-01')
+      get_X_y(selected_tickers, period, start, end, split_date='2019-01-01', force_download=True)
     save_data(data_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
     logger.info(f'Data saved to {data_dir}...')
   else:
@@ -505,7 +510,7 @@ def main(argv):
     best_value_rf = None
 
   study_rf.optimize(lambda trial: objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all), 
-                    n_trials=iterations)
+                    n_trials=rf_iterations)
   best_value_rf_new = study_rf.best_value
 
   if best_value_rf_new is not None and (best_value_rf is None or best_value_rf_new < best_value_rf):
@@ -533,7 +538,7 @@ def main(argv):
   else:
     best_value_svm = None
 
-  study_svm.optimize(lambda trial: objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all), n_trials=iterations)
+  study_svm.optimize(lambda trial: objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all), n_trials=svr_iterations)
   
   best_value_svm_new = study_svm.best_value
   if best_value_svm_new is not None and (best_value_svm is None or best_value_svm_new < best_value_svm):

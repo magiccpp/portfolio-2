@@ -40,7 +40,7 @@ MAX_RISK = 0.08
 
 
 def get_predict_X(stock_name, sorted_features, start='2018-01-01'):        
-  df = load_latest_price_data(stock_name, start)
+  df = load_latest_price_data(stock_name, start, end=None, save=False)
   df, feature_columns = add_features(df, 10)
   # timestamp = df.index[0]
   # earliest_date = timestamp.strftime('%Y-%m-%d')
@@ -219,6 +219,8 @@ def main(argv):
 
   period = 128
   divisor = 512 / period
+  n_days_errors = {}
+
   for i in range(len(valid_tickers)):
     stock_name = valid_tickers[i].strip()
     df_train_X = df_train_X_all[i]
@@ -253,16 +255,26 @@ def main(argv):
         best_pipeline_svr.fit(X_train, y_train)
         save_pkl(best_pipeline_svr, svr_model_path)
 
-      if update_covariance:
-        y_pred_rf = best_pipeline_rf.predict(X_test)
-        y_pred_svr = best_pipeline_svr.predict(X_test)
+      y_pred_rf = best_pipeline_rf.predict(X_test)
+      y_pred_svr = best_pipeline_svr.predict(X_test)
+      # compute the naive prediction
+      df_test_X_naive = pd.concat((df_train_X[-512:], df_test_X))
+      y_pred_naive = (df_test_X_naive[f'log_price_diff_512'].rolling(window=512).mean()[512:] / divisor).to_numpy()
 
-        # compute the naive prediction
-        df_test_X_naive = pd.concat((df_train_X[-512:], df_test_X))
-        y_pred_naive = (df_test_X_naive[f'log_price_diff_512'].rolling(window=512).mean()[512:] / divisor).to_numpy()
-        
-        print(f"length: y_pred_naive: {len(y_pred_naive)}, y_pred_rf: {len(y_pred_rf)}, y_pred_svr: {len(y_pred_svr)}")
-        y_pred = (y_pred_rf + y_pred_svr + y_pred_naive) / 3
+      # calculate the mean squared error
+      err_rf = mean_squared_error(y_test, y_pred_rf)
+      err_svr = mean_squared_error(y_test, y_pred_svr)
+      err_naive = mean_squared_error(y_test, y_pred_naive)
+
+      n_days = len(X_train)
+      n_days_errors[stock_name] = (n_days, err_rf, err_svr, err_naive)
+      print(f"stock: {stock_name}, n_days: {n_days}, err_rf: {err_rf}, err_svr: {err_svr}, err_naive: {err_naive}")
+
+
+ 
+      
+      print(f"length: y_pred_naive: {len(y_pred_naive)}, y_pred_rf: {len(y_pred_rf)}, y_pred_svr: {len(y_pred_svr)}")
+      y_pred = (y_pred_rf + y_pred_svr + y_pred_naive) / 3
 
       df_predict_X = get_predict_X(stock_name, sorted_features)
       
@@ -277,23 +289,26 @@ def main(argv):
       logger.error(f'Error in predicting {stock_name}: {e}')
       continue
     
-    if update_covariance:
-      df_error = pd.DataFrame(y_pred - y_test, index=df_test_y.index, columns=[stock_name])
-      if all_errors is None:
-        all_errors = df_error
-      else:
-        # concatenate the new dataframe to the existing one, column wise, use outer approach
-        all_errors = pd.concat([all_errors, df_error], axis=1, join='outer')
+    # save the dict n_days_errors
+    with open(f'{data_dir}/n_days_errors.json', 'w') as f:
+      json.dump(n_days_errors, f)
+    
 
-      mse = mean_squared_error(y_test, y_pred)
+    df_error = pd.DataFrame(y_pred - y_test, index=df_test_y.index, columns=[stock_name])
+    if all_errors is None:
+      all_errors = df_error
+    else:
+      # concatenate the new dataframe to the existing one, column wise, use outer approach
+      all_errors = pd.concat([all_errors, df_error], axis=1, join='outer')
+
+    mse = mean_squared_error(y_test, y_pred)
 
     # the last prediction
     profit = y_pred_2[-1]
     exp_profits.append(profit)
-    if update_covariance:
-      logger.info(f'{stock_name}: exp profit={profit}, MSE={mse}')
-    else:
-      logger.info(f'{stock_name}: exp profit={profit}')
+
+    logger.info(f'{stock_name}: exp profit={profit}, MSE={mse}')
+
 
     # mse_rf.append(mse)
     final_tickers.append(stock_name)

@@ -6,6 +6,8 @@ from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
 import signal
 from sklearn.utils import shuffle
+from threading import Thread
+import time
 # Create a class to handle timeout situations
 class TimeoutException(Exception):
     pass
@@ -21,7 +23,6 @@ class TimeoutException(Exception):
 def timeout_handler(signum, frame):
     raise TimeoutException
 
-
 class SafeSVR(BaseEstimator, RegressorMixin):
     def __init__(self, C, kernel, gamma, epsilon, timeout):
         self.C = C
@@ -31,37 +32,100 @@ class SafeSVR(BaseEstimator, RegressorMixin):
         self.timeout = timeout
 
     def _create_svr(self):
-        return SVR(C=self.C, kernel=self.kernel, gamma=self.gamma, 
-            epsilon=self.epsilon)
+        return SVR(C=self.C, kernel=self.kernel, gamma=self.gamma, epsilon=self.epsilon)
+
+    def _fit_with_timeout(self, X, y, result):
+        try:
+            self.svr.fit(X, y)
+            result.append(True)
+        except Exception as e:
+            result.append(e)
 
     def fit(self, X, y):
         self.svr = self._create_svr()
+        result = []
 
-        # Setting timeout signal
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(self.timeout)
-        try:
-            # shuffle the data
-            self.svr.fit(X, y)
-            signal.alarm(0)
-        except TimeoutException:
+        thread = Thread(target=self._fit_with_timeout, args=(X, y, result))
+        thread.start()
+
+        thread.join(timeout=self.timeout)
+
+        if not result:
             raise TimeoutException("Fitting has been interrupted due to timeout.")
-        except LinAlgError:
-            raise LinAlgError("Linear Algebra calculation failed.")
+        elif isinstance(result[0], Exception):
+            raise result[0]
+
         return self
 
     def predict(self, X):
-        return self.svr.predict(X)
+        y_pred = self.svr.predict(X)
+        return y_pred
 
     def get_params(self, deep=True):
-        return {'C': self.C, 'kernel': self.kernel, 
-            'gamma': self.gamma, 'epsilon': self.epsilon, 'timeout': self.timeout}
+        return {'C': self.C, 'kernel': self.kernel, 'gamma': self.gamma, 'epsilon': self.epsilon, 'timeout': self.timeout}
 
     def set_params(self, **parameters):
         for parameter, value in parameters.items():
             setattr(self, parameter, value)
         self.svr = self._create_svr()
         return self
+
+
+
+# class SafeSVR(BaseEstimator, RegressorMixin):
+#     def __init__(self, C, kernel, gamma, epsilon, timeout):
+#         self.C = C
+#         self.kernel = kernel
+#         self.gamma = gamma
+#         self.epsilon = epsilon
+#         self.timeout = timeout
+
+#     def _create_svr(self):
+#         return SVR(C=self.C, kernel=self.kernel, gamma=self.gamma, 
+#             epsilon=self.epsilon)
+
+#     def fit(self, X, y):
+#         self.svr = self._create_svr()
+
+#         # Setting timeout signal
+#         signal.signal(signal.SIGALRM, timeout_handler)
+#         signal.alarm(self.timeout)
+#         try:
+#             # shuffle the data
+#             print('starting fitting')
+#             self.svr.fit(X, y)
+#             print('ending fitting')
+#             signal.alarm(0)
+#         except TimeoutException:
+#             raise TimeoutException("Fitting has been interrupted due to timeout.")
+#         except LinAlgError:
+#             raise LinAlgError("Linear Algebra calculation failed.")
+#         return self
+
+#     def predict(self, X):
+#         # Setting timeout signal
+#         signal.signal(signal.SIGALRM, timeout_handler)
+#         signal.alarm(self.timeout)
+#         try:
+#             print('starting prediction')
+#             y_pred = self.svr.predict(X)
+#             print('ending prediction')
+#             signal.alarm(0)
+#         except TimeoutException:
+#             raise TimeoutException("Prediction has been interrupted due to timeout.")
+#         except LinAlgError:
+#             raise LinAlgError("Linear Algebra calculation failed.")
+#         return y_pred
+
+#     def get_params(self, deep=True):
+#         return {'C': self.C, 'kernel': self.kernel, 
+#             'gamma': self.gamma, 'epsilon': self.epsilon, 'timeout': self.timeout}
+
+#     def set_params(self, **parameters):
+#         for parameter, value in parameters.items():
+#             setattr(self, parameter, value)
+#         self.svr = self._create_svr()
+#         return self
 
 class SafeRandomForestRegressor(BaseEstimator, RegressorMixin):
     def __init__(self, random_state=42, n_estimators=100, max_depth=None, min_samples_split=2,

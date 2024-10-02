@@ -216,7 +216,7 @@ def convert(df, exchange_name, inversion, exchange_name_yahoo):
   df_merged['Adj Close'] = df_merged['Adj Close'] * df_merged[exchange_name]
   return df_merged[['Adj Close', 'Volume']]
 
-def load_latest_price_data(stock_name, start='1950-01-01', end=None):
+def load_latest_price_data(stock_name, start='1950-01-01', end=None, save=True, force_download=False):
   file_path = f'data/prices/{stock_name}.csv'
   if end is not None:
     # get the number of seconds from end to now
@@ -225,11 +225,11 @@ def load_latest_price_data(stock_name, start='1950-01-01', end=None):
   else:
     seconds = NUMBER_RECENT_SECONDS
 
-  if not is_file_downloaded_recently(file_path, seconds=seconds):
+  if not is_file_downloaded_recently(file_path, seconds=seconds) or force_download:
     print('Preparing downloading:', stock_name)
     data = pdr.get_data_yahoo(stock_name, start=start, end=None, timeout=40)
     
-    if len(data) > 100:
+    if len(data) > 100 and save:
       data.to_csv(file_path)
     else:
       print(f'Cannot download {stock_name}, using old data...')
@@ -245,9 +245,9 @@ def load_latest_price_data(stock_name, start='1950-01-01', end=None):
   return df
 
 
-def   get_X_y_by_stock(stock_name, period, start, end, split_date):
+def   get_X_y_by_stock(stock_name, period, start, end, split_date, force_download):
   try:
-    df = load_latest_price_data(stock_name, start=start, end=end)
+    df = load_latest_price_data(stock_name, start=start, end=end, force_download=force_download)
   except FileNotFoundError:
     print(f'Cannot find data for: {stock_name}')
     return None, None, None, None
