@@ -1,4 +1,4 @@
-from util import load_pkl, load_latest_price_data, add_features, merge_fred, remove_nan
+from util import generate_features, load_pkl, load_latest_price_data, add_features, merge_fred, portfolio_log_return, portfolio_return, portfolio_volatility, portfolio_volatility_log_return, remove_nan
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_squared_error
@@ -12,6 +12,8 @@ from util import save_pkl, get_pipline_svr, get_pipline_rf
 import json
 import torch
 import os
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
 
 logger = logging.getLogger('inference')
 logger.setLevel(logging.DEBUG)  # Set the logging level
@@ -39,8 +41,10 @@ MAX_RISK = 0.08
 
 
 
-def get_predict_X(stock_name, sorted_features, start='2018-01-01'):        
-  df = load_latest_price_data(stock_name, start, end=None, save=False)
+def get_predict_X(stock_name, sorted_features, start='1950-01-01', max_rows=1000):        
+  df = load_latest_price_data(stock_name, start, end=None, save=True)
+
+
   df, feature_columns = add_features(df, 10)
   # timestamp = df.index[0]
   # earliest_date = timestamp.strftime('%Y-%m-%d')
@@ -58,21 +62,8 @@ def get_predict_X(stock_name, sorted_features, start='2018-01-01'):
   df, _ = remove_nan(df, type='top')
   df_predict_X = df[feature_columns]
   
-  return df_predict_X[sorted_features]
+  return df_predict_X[sorted_features].iloc[-max_rows:]
 
-def portfolio_volatility_log_return(weights, covariance):
-    return np.sqrt(np.dot(weights.T, np.dot(covariance, weights)))
-
-def portfolio_log_return(weights, returns, allow_short=False):
-    return np.sum(np.abs(returns)*weights) if allow_short else np.sum(returns*weights)
-
-def portfolio_volatility(weights, covariance_log_returns):
-    covariance_returns = np.exp(covariance_log_returns) - 1
-    return np.sqrt(np.dot(weights.T, np.dot(covariance_returns, weights)))
-
-def portfolio_return(weights, log_returns, allow_short=False):
-    returns = np.exp(log_returns) - 1
-    return np.sum(np.abs(returns)*weights) if allow_short else np.sum(returns*weights)
 
 def min_func_sharpe(weights, returns, covariance, risk_free_rate, allow_short=False):
     portfolio_ret = portfolio_log_return(weights, returns, allow_short)
@@ -80,8 +71,12 @@ def min_func_sharpe(weights, returns, covariance, risk_free_rate, allow_short=Fa
     sharpe_ratio = (portfolio_ret - risk_free_rate) / portfolio_vol
     return -sharpe_ratio # Negate Sharpe ratio because we minimize the function
 
+def min_func_one_sigma(weights, returns, covariance, risk_free_rate, allow_short=False):
+  portfolio_ret = portfolio_log_return(weights, returns, allow_short)
+  portfolio_vol = portfolio_volatility_log_return(weights, covariance)
+  return -(portfolio_ret - risk_free_rate - portfolio_vol)
 
-def optimize_portfolio(returns, covariance, risk_free_rate, allow_short=False):
+def optimize_portfolio(returns, covariance, risk_free_rate, bounds, allow_short=False):
     num_assets = len(returns)
     args = (returns, covariance, risk_free_rate)
 
@@ -91,11 +86,10 @@ def optimize_portfolio(returns, covariance, risk_free_rate, allow_short=False):
     
     constraints = [{'type': 'eq', 'fun': constraint_sum}]
 
-    bounds = tuple((0.0, 0.20) for _ in range(num_assets))
 
     # Perform optimization
     def objective(weights):
-        return min_func_sharpe(weights, returns, covariance, risk_free_rate, allow_short)
+        return min_func_one_sigma(weights, returns, covariance, risk_free_rate, allow_short)
     
     iteration = [0]  # mutable container to store iteration count
     def callback(weights):
@@ -120,10 +114,24 @@ def get_shrinkage_covariance(df):
     shrink_cov = pd.DataFrame(lw.covariance_, index=df.columns, columns=df.columns)
     return shrink_cov
 
+def get_bounds(tickers):
+  # for ETF, the allowed weight is between 0 and 20%
+  # for stocks, the allowed weight is between 0 and 10%
+  num_assets = len(tickers)
+  if num_assets == 0:
+    return None
+
+  # get ETF tickers and save them into a set
+  with open('data/etf.txt', 'r') as f:
+    etf_tickers = set(f.readlines()) 
+
+  bounds = tuple((0.0, 0.10) if ticker in etf_tickers else (0.0, 0.05) for ticker in tickers)
+  return bounds
 
 def do_optimization(mu, S, final_tickers, period, allow_short):
   riskfree_log_return = np.log(1 + INTEREST_RATE) * period / ANNUAL_TRADING_DAYS
-  raw_weights = optimize_portfolio(mu, S, riskfree_log_return, allow_short)
+  bounds = get_bounds(final_tickers)
+  raw_weights = optimize_portfolio(mu, S, riskfree_log_return, bounds, allow_short)
   weights = raw_weights.x
   
   tickers_to_buy = []
@@ -149,17 +157,17 @@ def main(argv):
   logger.info('training started...')
   period = None
   iterations = 50
-  update_covariance = False
+  update_covariance = True
   try:
-      opts, args = getopt.getopt(argv, "p:u", ["period=", "update-covariance"])
+      opts, args = getopt.getopt(argv, "p:u", ["period=", "no-update-covariance"])
   except getopt.GetoptError:
-    logger.error('usage: python inference.py --period=<days> --update-covariance')
+    logger.error('usage: python inference.py --period=<days> --no-update-covariance')
     sys.exit(2)
   for opt, arg in opts:
     if opt in ("-p", "--period"):
         period = int(arg)
-    elif opt in ("-u", "--update-covariance"):
-       update_covariance = True
+    elif opt in ("-u", "--no-update-covariance"):
+       update_covariance = False
 
   if period is None:
     logger.error('usage: script.py --period <days>')
@@ -177,14 +185,22 @@ def main(argv):
       valid_tickers = f.readlines()
 
   logger.info(f'Data preparation finished, found {len(valid_tickers)} assets with enough data.')
-  feature_file_path = './processed_data_128/features.txt'
-  # Read the text file and convert the contents back to a numpy array
-  with open(feature_file_path, 'r') as file:
-    sorted_features = np.array(file.read().split('\n'))
+  feature_file_path = f'./processed_data_{period}/sorted_features.txt'
 
+  if not os.path.exists(feature_file_path):
+    print('generating features...')
+    generate_features(period, df_train_X_all, df_train_y_all, valid_tickers)
+  else:
+    # Read the text file and convert the contents back to a numpy array
+    # remove the empty string at the end
+    with open(feature_file_path, 'r') as file:
+      sorted_features = np.array(file.read().split('\n'))
+
+  sorted_features = sorted_features[sorted_features != '']
+  
   # iterate all tickers, reorder the features based on the scores by descending order
   for i in range(len(valid_tickers)):
-    df_train_X_all[i] = df_train_X_all[i][sorted_features]
+    df_train_X_all[i] = df_train_X_all[i][sorted_features]  
     df_test_X_all[i] = df_test_X_all[i][sorted_features]
 
   # You can load it back into memory with the following code
@@ -216,8 +232,6 @@ def main(argv):
   exp_profits = []
   final_tickers = []
 
-
-  period = 128
   divisor = 512 / period
   n_days_errors = {}
 
@@ -236,6 +250,10 @@ def main(argv):
     # make the prediction
     try:
       # check if the model exists
+      # create the model path if not exists
+      if not os.path.exists(f'{data_dir}/models'):
+        os.makedirs(f'{data_dir}/models')
+
       rf_model_path = f'{data_dir}/models/{stock_name}_rf.pkl'
       svr_model_path = f'{data_dir}/models/{stock_name}_svr.pkl'
 
@@ -268,12 +286,9 @@ def main(argv):
 
       n_days = len(X_train)
       n_days_errors[stock_name] = (n_days, err_rf, err_svr, err_naive)
-      print(f"stock: {stock_name}, n_days: {n_days}, err_rf: {err_rf}, err_svr: {err_svr}, err_naive: {err_naive}")
+      logging.info(f"inference {period} stock: {stock_name}, n_days: {n_days}, err_rf: {err_rf}, err_svr: {err_svr}, err_naive: {err_naive}")
 
-
- 
-      
-      print(f"length: y_pred_naive: {len(y_pred_naive)}, y_pred_rf: {len(y_pred_rf)}, y_pred_svr: {len(y_pred_svr)}")
+      logging.info(f"inference {period} length: y_pred_naive: {len(y_pred_naive)}, y_pred_rf: {len(y_pred_rf)}, y_pred_svr: {len(y_pred_svr)}")
       y_pred = (y_pred_rf + y_pred_svr + y_pred_naive) / 3
 
       df_predict_X = get_predict_X(stock_name, sorted_features)
@@ -284,7 +299,7 @@ def main(argv):
       y_pred_2_svr = best_pipeline_svr.predict(X_predict)[512:]
       y_pred_2_naive = df_predict_X[f'log_price_diff_512'].rolling(window=512).mean()[512:] / divisor
       y_pred_2 = (y_pred_2_rf + y_pred_2_svr + y_pred_2_naive) / 3
-      print(f"length: y_pred_2_naive: {len(y_pred_2_naive)}, y_pred_2_rf: {len(y_pred_2_rf)}, y_pred_2_svr: {len(y_pred_2_svr)}")
+      logging.info(f"inference {period} length: y_pred_2_naive: {len(y_pred_2_naive)}, y_pred_2_rf: {len(y_pred_2_rf)}, y_pred_2_svr: {len(y_pred_2_svr)}")
     except Exception as e:
       logger.error(f'Error in predicting {stock_name}: {e}')
       continue
@@ -304,10 +319,10 @@ def main(argv):
     mse = mean_squared_error(y_test, y_pred)
 
     # the last prediction
-    profit = y_pred_2[-1]
+    profit = y_pred_2.iloc[-1]
     exp_profits.append(profit)
 
-    logger.info(f'{stock_name}: exp profit={profit}, MSE={mse}')
+    logger.info(f'inference {period} {stock_name}: exp profit={profit}, MSE={mse}')
 
 
     # mse_rf.append(mse)
@@ -341,7 +356,7 @@ def main(argv):
 
   # save the result
   cur_date = pd.Timestamp.now().strftime('%Y%m%d')
-  np.save(f'{data_dir}/mu-{cur_date}.npy', np.array(mu))
+  np.save(f'{data_dir}/mu.npy', np.array(mu))
 
   # save the all errors
 
@@ -353,6 +368,10 @@ def main(argv):
       f.write(f'{ticker}\n')
 
   ticket_to_buy_json = do_optimization(mu, S, final_tickers, period, allow_short=False)
+
+  # create the directory if not exists
+  if not os.path.exists(f'{data_dir}/computed_portfolios'):
+    os.makedirs(f'{data_dir}/computed_portfolios')
 
   with open(f'{data_dir}/computed_portfolios/tickers_to_buy_{cur_date}.json', 'w') as f:
     f.write(ticket_to_buy_json)

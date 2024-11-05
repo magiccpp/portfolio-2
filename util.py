@@ -1,3 +1,8 @@
+import atexit
+import json
+import sys
+from sklearn.linear_model import LinearRegression
+
 import pandas as pd
 from datetime import timedelta
 from pandas_datareader import data as pdr
@@ -12,6 +17,8 @@ from sklearn.feature_selection import f_regression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.base import BaseEstimator, TransformerMixin
+from scipy.optimize import minimize
+from sklearn.covariance import LedoitWolf
 yfin.pdr_override()
 
 NUMBER_RECENT_SECONDS = 72000
@@ -20,6 +27,9 @@ MIN_TRAINING_DATA_PER_STOCK = 500
 MIN_TEST_DATA_PER_STOCK = 300
 TIMEOUT = 120
 
+INTEREST_RATE = 0.0497    # Current interest rate accessible for USD
+ANNUAL_TRADING_DAYS = 252
+MAX_RISK = 0.08
 
 def get_tickers(ticker_list_file):
   with open(f'data/{ticker_list_file}', 'r') as f:
@@ -216,8 +226,41 @@ def convert(df, exchange_name, inversion, exchange_name_yahoo):
   df_merged['Adj Close'] = df_merged['Adj Close'] * df_merged[exchange_name]
   return df_merged[['Adj Close', 'Volume']]
 
+
+class FileLock:
+    def __init__(self, lock_path, max_retries=10, delay_seconds=5):
+        self.lock_path = lock_path
+        self.max_retries = max_retries
+        self.delay_seconds = delay_seconds
+        self.lock_acquired = False
+
+    def __enter__(self):
+        attempts = 0
+        while attempts < self.max_retries:
+            try:
+                os.makedirs(self.lock_path)
+                atexit.register(self.release)
+                self.lock_acquired = True
+                return self
+            except FileExistsError:
+                time.sleep(self.delay_seconds)
+                attempts += 1
+        raise RuntimeError(f"Could not acquire lock for {self.lock_path} after retries")
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.release()
+
+    def release(self):
+        if self.lock_acquired:
+            try:
+                os.rmdir(self.lock_path)
+                self.lock_acquired = False
+            except OSError:
+                pass
+
 def load_latest_price_data(stock_name, start='1950-01-01', end=None, save=True, force_download=False):
   file_path = f'data/prices/{stock_name}.csv'
+  
   if end is not None:
     # get the number of seconds from end to now
     now = pd.Timestamp.now()
@@ -225,16 +268,22 @@ def load_latest_price_data(stock_name, start='1950-01-01', end=None, save=True, 
   else:
     seconds = NUMBER_RECENT_SECONDS
 
-  if not is_file_downloaded_recently(file_path, seconds=seconds) or force_download:
-    print('Preparing downloading:', stock_name)
-    data = pdr.get_data_yahoo(stock_name, start=start, end=None, timeout=40)
-    
-    if len(data) > 100 and save:
-      data.to_csv(file_path)
-    else:
-      print(f'Cannot download {stock_name}, using old data...')
+  lock_path = f'data/prices/.lock_{stock_name}'
 
-  df = pd.read_csv(file_path, index_col='Date', parse_dates=True)
+  with FileLock(lock_path):
+    if not is_file_downloaded_recently(file_path, seconds=seconds) or force_download:
+      print('Preparing downloading:', stock_name)
+      data = pdr.get_data_yahoo(stock_name, start=start, end=None, timeout=40)
+      
+      if len(data) > 100:
+        if save:
+          data.to_csv(file_path)
+      else:
+        print(f'Cannot download {stock_name}, using old data...')
+
+    df = pd.read_csv(file_path, index_col='Date', parse_dates=True)
+  # Release the lock before potential return
+
   if len(df) < 100:
     return None
   
@@ -365,3 +414,147 @@ def get_pipline_svr(params):
       ))])
   
   return pipeline
+
+def create_if_not_exist(path):
+  if not os.path.exists(path):
+    os.makedirs(path)
+    print(f'Creating {path}...')
+
+
+def portfolio_volatility_log_return(weights, covariance):
+    return np.sqrt(np.dot(weights.T, np.dot(covariance, weights)))
+
+def portfolio_log_return(weights, returns, allow_short=False):
+    return np.sum(np.abs(returns)*weights) if allow_short else np.sum(returns*weights)
+
+def portfolio_volatility(weights, covariance_log_returns):
+    covariance_returns = np.exp(covariance_log_returns) - 1
+    return np.sqrt(np.dot(weights.T, np.dot(covariance_returns, weights)))
+
+def portfolio_return(weights, log_returns, allow_short=False):
+    returns = np.exp(log_returns) - 1
+    return np.sum(np.abs(returns)*weights) if allow_short else np.sum(returns*weights)
+
+def generate_features(data_dir, df_train_X_all, df_train_y_all, valid_tickers):
+  feature_names = list(df_train_X_all[0].columns)
+  coefficients = np.zeros(len(feature_names))
+  for i in range(len(valid_tickers)):
+      ticker = valid_tickers[i]
+      df_train_X_stock = df_train_X_all[i]
+      df_train_y_stock = df_train_y_all[i]
+      # concat the gspc data to the d_train_X_stock
+
+      # scale the features
+      scaler = StandardScaler()
+      df_train_X_stock = scaler.fit_transform(df_train_X_stock)
+
+      # Apply feature selection using SelectKBest
+      #selector = SelectKBest(f_regression, k=5)  # Select 5 best features
+      # X_new = selector.fit_transform(df_train_X_stock, df_train_y_stock['log_predict'])
+
+      # Fit linear regression model
+      model = LinearRegression()
+      model.fit(df_train_X_stock, df_train_y_stock['log_predict'])
+
+      # Get the coefficients of the selected features:
+      coefficients += model.coef_
+
+      # Mapping back to feature names (assuming you have a list of feature names)
+      
+  sorted_scores = np.abs(coefficients).argsort()[::-1]  # Sort indices in descending order of scores
+  feature_names = np.array(feature_names)
+  sorted_features = feature_names[sorted_scores]
+
+  with open(f'{data_dir}/sorted_features.txt', 'w') as f:
+    for item in sorted_features:
+      f.write("%s\n" % item)
+  return sorted_features
+
+
+def min_func_sharpe(weights, returns, covariance, risk_free_rate, allow_short=False):
+    portfolio_ret = portfolio_log_return(weights, returns, allow_short)
+    portfolio_vol = portfolio_volatility_log_return(weights, covariance)
+    sharpe_ratio = (portfolio_ret - risk_free_rate) / portfolio_vol
+    return -sharpe_ratio # Negate Sharpe ratio because we minimize the function
+
+def min_func_two_sigma(weights, returns, covariance, risk_free_rate, allow_short=False):
+    portfolio_ret = portfolio_log_return(weights, returns, allow_short)
+    portfolio_vol = portfolio_volatility_log_return(weights, covariance)
+    value = portfolio_ret - risk_free_rate -  2 * portfolio_vol
+    return -value # Negate Sharpe ratio because we minimize the function
+
+
+
+
+def optimize_portfolio(returns, covariance, risk_free_rate, bounds, allow_short=False):
+    num_assets = len(returns)
+    args = (returns, covariance, risk_free_rate)
+
+    # Define constraints
+    def constraint_sum(weights):
+        return np.sum(weights) - 1 
+    
+    constraints = [{'type': 'eq', 'fun': constraint_sum}]
+
+
+    # Perform optimization
+    def objective(weights):
+        return min_func_two_sigma(weights, returns, covariance, risk_free_rate, allow_short)
+    
+    iteration = [0]  # mutable container to store iteration count
+    def callback(weights):
+        iteration[0] += 1
+        
+        print(f"Iteration: {iteration[0]}, value: {objective(weights)}")
+
+    # Initial guess (equal weights)
+    initial_guess = num_assets * [1. / num_assets]
+
+    # Perform optimization
+    result = minimize(objective, initial_guess, 
+                      method='SLSQP', bounds=bounds, constraints=constraints, callback=callback, options={'maxiter': 100})
+
+    return result
+
+def get_bounds(tickers, max_weight):
+  # for ETF, the allowed weight is between 0 and 20%
+  # for stocks, the allowed weight is between 0 and 10%
+  num_assets = len(tickers)
+  if num_assets == 0:
+    return None
+
+  bounds = tuple((0.0, max_weight) for ticker in tickers)
+  return bounds
+
+def do_optimization(mu, S, final_tickers, period, allow_short, max_weight):
+  riskfree_log_return = np.log(1 + INTEREST_RATE) * period / ANNUAL_TRADING_DAYS
+  bounds = get_bounds(final_tickers, max_weight)
+  raw_weights = optimize_portfolio(mu, S, riskfree_log_return, bounds, allow_short)
+  weights = raw_weights.x
+  
+  tickers_to_buy = []
+  print(f'Starting optimization: allow_short: {allow_short}')
+  for index, ticker_name in enumerate(final_tickers):
+    weight = weights[index]
+    if weight > 1e-3:
+      print(f'index: {index} {ticker_name}: weight {weight} exp profit: {mu[index]}, variance: {S[ticker_name][ticker_name]}')
+      ticker_info = {'id': ticker_name, 'weight': weight}
+      tickers_to_buy.append(ticker_info)
+
+  print(f'expected return in {period} trading days: {portfolio_return(weights, mu)}')
+  print(f'volatility of the return in {period} trading days: {portfolio_volatility(weights, S)}')
+  print(f'optimization finished for allow_short={allow_short}')
+  # print tickers_to_buy in JSON format
+
+  tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
+  print(tickers_to_buy_json)
+  return tickers_to_buy_json
+
+
+
+def get_shrinkage_covariance(df):
+    lw = LedoitWolf(store_precision=False, assume_centered=True)
+    lw.fit(df)
+    # Convert the ndarray back to a DataFrame and use the column and index from the original DataFrame
+    shrink_cov = pd.DataFrame(lw.covariance_, index=df.columns, columns=df.columns)
+    return shrink_cov

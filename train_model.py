@@ -1,5 +1,7 @@
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import uuid
-from util import get_X_y_by_stock, get_tickers, get_currency_pair, load_latest_price_data, convert, add_features, load_pkl, merge_fred, remove_nan
+from util import create_if_not_exist, generate_features, get_X_y_by_stock, get_tickers, get_currency_pair, load_latest_price_data, convert, add_features, load_pkl, merge_fred, remove_nan
 from util import save_pkl, get_pipline_svr, get_pipline_rf
 from pandas_datareader import data as pdr
 import random
@@ -58,7 +60,7 @@ TIMEOUT = 120
 # number of trials to do the hyper-parameter optimization
 N_TRIALS = 50
 
-tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('ssec.txt') + get_tickers('cac_40.txt')
+tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('ssec.txt') + get_tickers('cac_40.txt') + get_tickers('etf.txt')
 selected_tickers = tickers
 
 
@@ -266,6 +268,7 @@ def test_all(data_dir, best_pipeline_svm, best_pipeline_rf, valid_tickers, df_tr
     y_pred_svm = best_pipeline_svm.predict(X_test)
 
     # save the model to a file
+    create_if_not_exist(f'{data_dir}/models')
     with open(f'{data_dir}/models/{stock_name}_svm.pkl', 'wb') as f:
       pickle.dump(best_pipeline_svm, f)
 
@@ -399,29 +402,27 @@ def if_data_exists(data_dir):
     return False
   return True
 
-# get the sorted feature in descending order of importance.
-def get_sorted_features(df_train_X_all, df_train_y_all):
-  tot_scores = None
-  for i in range(len(df_train_X_all)):
-    # Filter the training and testing data for the current stock
-    df_train_X_stock = df_train_X_all[i]
-    df_train_y_stock = df_train_y_all[i]
 
-    # Apply feature selection using SelectKBest
-    selector = SelectKBest(f_regression, k=5)  # Select 5 best features
-    selector.fit(df_train_X_stock, df_train_y_stock['log_predict'])
-    scores = selector.scores_
+def optimize(algo_name, study_name, mysql_url, iterations, objective, get_pipline, valid_tickers, df_train_X_all, df_train_y_all):
+  print(f'Starting finding optimized hyper-parameters for the {algo_name}...')
+  study = optuna.create_study(study_name=study_name, storage=mysql_url, load_if_exists=True)
+  # check if study_svm contains best value.
+  if len(study.get_trials()) > 0:
+    best_value = study.best_trial.value
+  else:
+    best_value = None
+  logger.info(f'Current best value: {best_value}')
 
-    # make element-wise addition for tot_scores
-    if tot_scores is None:
-        tot_scores = scores/len(df_train_X_all)
-    else:
-        tot_scores += scores/len(df_train_X_all)
-  # Get the scores in descending order
-  feature_names = df_train_X_all[0].columns
-  sorted_scores = scores.argsort()[::-1]  # Sort indices in descending order of scores
-  sorted_features = feature_names[sorted_scores]
-  return sorted_features
+  study.optimize(lambda trial: objective(trial, valid_tickers, df_train_X_all, df_train_y_all), 
+                    n_trials=iterations)
+  best_value_new = study.best_value
+
+  if best_value_new is not None and (best_value is None or best_value_new < best_value):
+    best_pipeline = get_pipline(study.best_params)
+    logger.info(f'new best value found: {best_value_new}')
+  else:
+    best_pipeline = get_pipline(study.best_params)
+  return best_pipeline
 
 def main(argv):
   logger.info('training started...')
@@ -429,13 +430,15 @@ def main(argv):
   iterations = 10
   try:
       # delete: delete the previous study
-      opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "svr_iter=", "rf_iter=", "reload", "delete"])
+      opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "svr_iter=", "rf_iter=", "reload", "delete_svr", "delete_rf", "skip_test"])
   except getopt.GetoptError:
-    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete')
+    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete_svr --delete_rf --skip_test')
     sys.exit(2)
 
   reload_data = False
-  delete_study = False
+  delete_svr_study = False
+  delete_rf_study = False
+  skip_test = False
   for opt, arg in opts:
     if opt in ("-p", "--period"):
         period = int(arg)
@@ -445,8 +448,12 @@ def main(argv):
         rf_iterations = int(arg)
     elif opt in ("-r", "--reload"):
         reload_data = True
-    elif opt in ("-d", "--delete"):
-        delete_study = True
+    elif opt in ("-d", "--delete_svr"):
+        delete_svr_study = True
+    elif opt in ("-d", "--delete_rf"):
+        delete_rf_study = True
+    elif opt in ("--skip_test"):
+        skip_test = True
 
   if period is None:
     logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete')
@@ -478,7 +485,18 @@ def main(argv):
 
   logger.info(f'Data preparation finished, found {len(valid_tickers)} assets with enough data.')
   logger.info("Finding the importances of features...")
-  sorted_features = get_sorted_features(df_train_X_all, df_train_y_all)
+
+  data_dir = f'./processed_data_{period}'
+  feature_file_path = f'./{data_dir}/sorted_features.txt'
+  
+  if not os.path.exists(feature_file_path):
+    print('generating features...')
+    sorted_features = generate_features(data_dir, df_train_X_all, df_train_y_all, valid_tickers)
+  else:
+    with open(feature_file_path, 'r') as file:
+      sorted_features = np.array(file.read().split('\n'))
+      sorted_features = sorted_features[sorted_features != '']
+      
   logger.info(f'The ordered features are: {sorted_features}')
 
   # iterate all tickers, reorder the features based on the scores by descending order
@@ -492,9 +510,8 @@ def main(argv):
   mysql_url = "mysql://root@192.168.2.34:3306/mysql"
   n_columns = len(df_train_X_all[0].columns)
 
-  print('Starting finding optimized hyper-parameters for the RF...')
   study_rf_name = f'study_rf_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
-  if delete_study:
+  if delete_rf_study:
     try:
       optuna.delete_study(study_rf_name, storage=mysql_url)
       logger.info(f'Study {study_rf_name} deleted...')
@@ -502,27 +519,8 @@ def main(argv):
       # pass if the study does not exist
       pass
 
-  study_rf = optuna.create_study(study_name=study_rf_name, storage=mysql_url, load_if_exists=True)
-  # check if study_svm contains best value.
-  if len(study_rf.get_trials()) > 0:
-    best_value_rf = study_rf.best_trial.value
-  else:
-    best_value_rf = None
-
-  study_rf.optimize(lambda trial: objective_random_forest(trial, valid_tickers, df_train_X_all, df_train_y_all), 
-                    n_trials=rf_iterations)
-  best_value_rf_new = study_rf.best_value
-
-  if best_value_rf_new is not None and (best_value_rf is None or best_value_rf_new < best_value_rf):
-    best_pipeline_rf = get_pipline_rf(study_rf.best_params)
-    logger.info(f'new best value found: {best_value_rf_new}')
-  else:
-    logger.info('No better model found...')
-    best_pipeline_rf = get_pipline_rf(study_rf.best_params)
-
-  print('Starting finding optimized hyper-parameters for SVM...')
   study_svm_name = f'study_svm_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
-  if delete_study:
+  if delete_svr_study:
     try:
       optuna.delete_study(study_svm_name, storage=mysql_url)
       logger.info(f'Study {study_svm_name} deleted...')
@@ -530,26 +528,18 @@ def main(argv):
       # pass if the study does not exist
       pass
 
-  study_svm = optuna.create_study(study_name=study_svm_name, storage=mysql_url, load_if_exists=True)
-
-  # check if study_svm contains best value.
-  if len(study_svm.get_trials()) > 0:
-    best_value_svm = study_rf.best_trial.value
-  else:
-    best_value_svm = None
-
-  study_svm.optimize(lambda trial: objective_svm(trial, valid_tickers, df_train_X_all, df_train_y_all), n_trials=svr_iterations)
+  if rf_iterations > 0:
+    best_pipeline_rf = optimize('Random Forest', study_rf_name, mysql_url, rf_iterations, objective_random_forest, get_pipline_rf,
+                                          valid_tickers, df_train_X_all, df_train_y_all)
+  if svr_iterations > 0:
+    best_pipeline_svm = optimize('SVM', study_svm_name, mysql_url, svr_iterations, objective_svm, get_pipline_svr,
+                                          valid_tickers, df_train_X_all, df_train_y_all)
+      
+  if skip_test:
+    print('skiping test...')
+    return
   
-  best_value_svm_new = study_svm.best_value
-  if best_value_svm_new is not None and (best_value_svm is None or best_value_svm_new < best_value_svm):
-    logger.info(f'new best value found: {best_value_svm_new}')
-    best_pipeline_svm = get_pipline_svr(study_svm.best_params)
-  else:
-    logger.info(f'No better model found')
-    best_pipeline_svm = get_pipline_svr(study_svm.best_params)
-
   logger.info(f'Starting test')
-
   test_naive(valid_tickers, df_test_X_all, df_test_y_all, period)
   #test_rf(best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
   test_all(data_dir, best_pipeline_rf, best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
