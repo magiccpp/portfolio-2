@@ -34,7 +34,7 @@ wait $PID5
 wait $PID6
 
 # Once all parallel tasks are done, run this command
-python ./multi_horizon.py --periods 8,16,32,64,128,256
+python ./multi_horizon.py --periods 8,16,32,64,128,256 >> /tmp/multi_horizon.log 2>&1
 
 # Deactivate the conda environment
 conda deactivate

@@ -1,4 +1,4 @@
-from util import generate_features, load_pkl, load_latest_price_data, add_features, merge_fred, portfolio_log_return, portfolio_return, portfolio_volatility, portfolio_volatility_log_return, remove_nan
+from util import generate_features, get_doubled_matrix, load_pkl, load_latest_price_data, add_features, merge_fred, portfolio_log_return, portfolio_return, portfolio_volatility, portfolio_volatility_log_return, remove_nan
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_squared_error
@@ -65,18 +65,18 @@ def get_predict_X(stock_name, sorted_features, start='1950-01-01', max_rows=1000
   return df_predict_X[sorted_features].iloc[-max_rows:]
 
 
-def min_func_sharpe(weights, returns, covariance, risk_free_rate, allow_short=False):
-    portfolio_ret = portfolio_log_return(weights, returns, allow_short)
+def min_func_sharpe(weights, returns, covariance, risk_free_rate):
+    portfolio_ret = portfolio_log_return(weights, returns)
     portfolio_vol = portfolio_volatility_log_return(weights, covariance)
     sharpe_ratio = (portfolio_ret - risk_free_rate) / portfolio_vol
     return -sharpe_ratio # Negate Sharpe ratio because we minimize the function
 
-def min_func_one_sigma(weights, returns, covariance, risk_free_rate, allow_short=False):
-  portfolio_ret = portfolio_log_return(weights, returns, allow_short)
+def min_func_one_sigma(weights, returns, covariance, risk_free_rate):
+  portfolio_ret = portfolio_log_return(weights, returns)
   portfolio_vol = portfolio_volatility_log_return(weights, covariance)
   return -(portfolio_ret - risk_free_rate - portfolio_vol)
 
-def optimize_portfolio(returns, covariance, risk_free_rate, bounds, allow_short=False):
+def optimize_portfolio(returns, covariance, risk_free_rate, bounds):
     num_assets = len(returns)
     args = (returns, covariance, risk_free_rate)
 
@@ -89,7 +89,7 @@ def optimize_portfolio(returns, covariance, risk_free_rate, bounds, allow_short=
 
     # Perform optimization
     def objective(weights):
-        return min_func_one_sigma(weights, returns, covariance, risk_free_rate, allow_short)
+        return min_func_one_sigma(weights, returns, covariance, risk_free_rate)
     
     iteration = [0]  # mutable container to store iteration count
     def callback(weights):
@@ -114,28 +114,23 @@ def get_shrinkage_covariance(df):
     shrink_cov = pd.DataFrame(lw.covariance_, index=df.columns, columns=df.columns)
     return shrink_cov
 
-def get_bounds(tickers):
+def get_bounds(tickers, lower_bound, upper_bound):
   # for ETF, the allowed weight is between 0 and 20%
   # for stocks, the allowed weight is between 0 and 10%
   num_assets = len(tickers)
   if num_assets == 0:
     return None
 
-  # get ETF tickers and save them into a set
-  with open('data/etf.txt', 'r') as f:
-    etf_tickers = set(f.readlines()) 
-
-  bounds = tuple((0.0, 0.10) if ticker in etf_tickers else (0.0, 0.05) for ticker in tickers)
+  bounds = tuple((lower_bound, upper_bound) for ticker in tickers)
   return bounds
 
-def do_optimization(mu, S, final_tickers, period, allow_short):
+def do_optimization(mu, S, final_tickers, period, lower_bound, upper_bound):
   riskfree_log_return = np.log(1 + INTEREST_RATE) * period / ANNUAL_TRADING_DAYS
-  bounds = get_bounds(final_tickers)
-  raw_weights = optimize_portfolio(mu, S, riskfree_log_return, bounds, allow_short)
+  bounds = get_bounds(final_tickers, lower_bound, upper_bound)
+  raw_weights = optimize_portfolio(mu, S, riskfree_log_return, bounds)
   weights = raw_weights.x
   
   tickers_to_buy = []
-  logger.info(f'Starting optimization: allow_short: {allow_short}')
   for index, ticker_name in enumerate(final_tickers):
     weight = weights[index]
     if weight > 1e-3:
@@ -145,7 +140,6 @@ def do_optimization(mu, S, final_tickers, period, allow_short):
 
   logger.info(f'expected return in {period} trading days: {portfolio_return(weights, mu)}')
   logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(weights, S)}')
-  logger.info(f'optimization finished for allow_short={allow_short}')
   # print tickers_to_buy in JSON format
 
   tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
@@ -158,6 +152,7 @@ def main(argv):
   period = None
   iterations = 50
   update_covariance = True
+  allow_short = True
   try:
       opts, args = getopt.getopt(argv, "p:u", ["period=", "no-update-covariance"])
   except getopt.GetoptError:
@@ -165,9 +160,10 @@ def main(argv):
     sys.exit(2)
   for opt, arg in opts:
     if opt in ("-p", "--period"):
-        period = int(arg)
+      period = int(arg)
     elif opt in ("-u", "--no-update-covariance"):
-       update_covariance = False
+      update_covariance = False
+
 
   if period is None:
     logger.error('usage: script.py --period <days>')
@@ -367,7 +363,7 @@ def main(argv):
     for ticker in final_tickers:
       f.write(f'{ticker}\n')
 
-  ticket_to_buy_json = do_optimization(mu, S, final_tickers, period, allow_short=False)
+  ticket_to_buy_json = do_optimization(mu, S, final_tickers, period, 0, 0.02)
 
   # create the directory if not exists
   if not os.path.exists(f'{data_dir}/computed_portfolios'):
@@ -375,6 +371,17 @@ def main(argv):
 
   with open(f'{data_dir}/computed_portfolios/tickers_to_buy_{cur_date}.json', 'w') as f:
     f.write(ticket_to_buy_json)
+
+  # allow short operations.
+  if allow_short:
+    ticket_to_buy_json = do_optimization(mu, S, final_tickers, period, -0.02, 0.02)
+
+    # create the directory if not exists
+    if not os.path.exists(f'{data_dir}/computed_portfolios_short'):
+      os.makedirs(f'{data_dir}/computed_portfolios_short')
+
+    with open(f'{data_dir}/computed_portfolios_short/tickers_to_buy_{cur_date}.json', 'w') as f:
+      f.write(ticket_to_buy_json)
 
 if __name__ == "__main__":
     main(sys.argv[1:])

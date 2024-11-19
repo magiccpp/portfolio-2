@@ -424,16 +424,16 @@ def create_if_not_exist(path):
 def portfolio_volatility_log_return(weights, covariance):
     return np.sqrt(np.dot(weights.T, np.dot(covariance, weights)))
 
-def portfolio_log_return(weights, returns, allow_short=False):
-    return np.sum(np.abs(returns)*weights) if allow_short else np.sum(returns*weights)
+def portfolio_log_return(weights, returns):
+    return np.sum(returns*weights)
 
 def portfolio_volatility(weights, covariance_log_returns):
     covariance_returns = np.exp(covariance_log_returns) - 1
     return np.sqrt(np.dot(weights.T, np.dot(covariance_returns, weights)))
 
-def portfolio_return(weights, log_returns, allow_short=False):
+def portfolio_return(weights, log_returns):
     returns = np.exp(log_returns) - 1
-    return np.sum(np.abs(returns)*weights) if allow_short else np.sum(returns*weights)
+    return np.sum(returns*weights)
 
 def generate_features(data_dir, df_train_X_all, df_train_y_all, valid_tickers):
   feature_names = list(df_train_X_all[0].columns)
@@ -471,14 +471,14 @@ def generate_features(data_dir, df_train_X_all, df_train_y_all, valid_tickers):
   return sorted_features
 
 
-def min_func_sharpe(weights, returns, covariance, risk_free_rate, allow_short=False):
-    portfolio_ret = portfolio_log_return(weights, returns, allow_short)
+def min_func_sharpe(weights, returns, covariance, risk_free_rate):
+    portfolio_ret = portfolio_log_return(weights, returns)
     portfolio_vol = portfolio_volatility_log_return(weights, covariance)
     sharpe_ratio = (portfolio_ret - risk_free_rate) / portfolio_vol
     return -sharpe_ratio # Negate Sharpe ratio because we minimize the function
 
-def min_func_two_sigma(weights, returns, covariance, risk_free_rate, allow_short=False):
-    portfolio_ret = portfolio_log_return(weights, returns, allow_short)
+def min_func_two_sigma(weights, returns, covariance, risk_free_rate):
+    portfolio_ret = portfolio_log_return(weights, returns)
     portfolio_vol = portfolio_volatility_log_return(weights, covariance)
     value = portfolio_ret - risk_free_rate -  2 * portfolio_vol
     return -value # Negate Sharpe ratio because we minimize the function
@@ -486,7 +486,7 @@ def min_func_two_sigma(weights, returns, covariance, risk_free_rate, allow_short
 
 
 
-def optimize_portfolio(returns, covariance, risk_free_rate, bounds, allow_short=False):
+def optimize_portfolio(returns, covariance, risk_free_rate, bounds):
     num_assets = len(returns)
     args = (returns, covariance, risk_free_rate)
 
@@ -499,7 +499,7 @@ def optimize_portfolio(returns, covariance, risk_free_rate, bounds, allow_short=
 
     # Perform optimization
     def objective(weights):
-        return min_func_two_sigma(weights, returns, covariance, risk_free_rate, allow_short)
+        return min_func_two_sigma(weights, returns, covariance, risk_free_rate)
     
     iteration = [0]  # mutable container to store iteration count
     def callback(weights):
@@ -526,14 +526,13 @@ def get_bounds(tickers, max_weight):
   bounds = tuple((0.0, max_weight) for ticker in tickers)
   return bounds
 
-def do_optimization(mu, S, final_tickers, period, allow_short, max_weight):
+def do_optimization(mu, S, final_tickers, period, max_weight):
   riskfree_log_return = np.log(1 + INTEREST_RATE) * period / ANNUAL_TRADING_DAYS
   bounds = get_bounds(final_tickers, max_weight)
-  raw_weights = optimize_portfolio(mu, S, riskfree_log_return, bounds, allow_short)
+  raw_weights = optimize_portfolio(mu, S, riskfree_log_return, bounds)
   weights = raw_weights.x
   
   tickers_to_buy = []
-  print(f'Starting optimization: allow_short: {allow_short}')
   for index, ticker_name in enumerate(final_tickers):
     weight = weights[index]
     if weight > 1e-3:
@@ -543,7 +542,6 @@ def do_optimization(mu, S, final_tickers, period, allow_short, max_weight):
 
   print(f'expected return in {period} trading days: {portfolio_return(weights, mu)}')
   print(f'volatility of the return in {period} trading days: {portfolio_volatility(weights, S)}')
-  print(f'optimization finished for allow_short={allow_short}')
   # print tickers_to_buy in JSON format
 
   tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
@@ -558,3 +556,27 @@ def get_shrinkage_covariance(df):
     # Convert the ndarray back to a DataFrame and use the column and index from the original DataFrame
     shrink_cov = pd.DataFrame(lw.covariance_, index=df.columns, columns=df.columns)
     return shrink_cov
+
+
+def get_doubled_matrix(S):
+    m = S.shape[0]  # Assuming S is a square matrix
+    
+    # Create the numpy array for S_prime
+    S_prime_array = np.zeros((2*m, 2*m))
+    S_prime_array[:m, :m] = S
+    S_prime_array[m:, m:] = S
+    S_prime_array[:m, m:] = -S
+    S_prime_array[m:, :m] = -S
+    
+    # Get the original column and index names
+    original_columns = S.columns
+    original_index = S.index
+    
+    # Create new column and index names
+    new_columns = list(original_columns) + [f'-{col}' for col in original_columns]
+    new_index = list(original_index) + [f'-{idx}' for idx in original_index]
+    
+    # Create the new DataFrame with appropriate column and index names
+    S_prime = pd.DataFrame(S_prime_array, columns=new_columns, index=new_index)
+    
+    return S_prime
