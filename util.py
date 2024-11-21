@@ -20,6 +20,11 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
 yfin.pdr_override()
+import logging
+
+logger = logging.getLogger('inference')
+logger.setLevel(logging.DEBUG)  # Set the logging level
+
 
 NUMBER_RECENT_SECONDS = 72000
 MIN_TOTAL_DATA_PER_STOCK = 1000
@@ -484,6 +489,11 @@ def min_func_two_sigma(weights, returns, covariance, risk_free_rate):
     return -value # Negate Sharpe ratio because we minimize the function
 
 
+def min_func_one_sigma(weights, returns, covariance, risk_free_rate):
+  portfolio_ret = portfolio_log_return(weights, returns)
+  portfolio_vol = portfolio_volatility_log_return(weights, covariance)
+  return -(portfolio_ret - risk_free_rate - portfolio_vol)
+
 
 
 def optimize_portfolio(returns, covariance, risk_free_rate, bounds):
@@ -492,14 +502,14 @@ def optimize_portfolio(returns, covariance, risk_free_rate, bounds):
 
     # Define constraints
     def constraint_sum(weights):
-        return np.sum(weights) - 1 
+        return np.sum(np.abs(weights)) - 1 
     
     constraints = [{'type': 'eq', 'fun': constraint_sum}]
 
 
     # Perform optimization
     def objective(weights):
-        return min_func_two_sigma(weights, returns, covariance, risk_free_rate)
+        return min_func_one_sigma(weights, returns, covariance, risk_free_rate)
     
     iteration = [0]  # mutable container to store iteration count
     def callback(weights):
@@ -516,32 +526,33 @@ def optimize_portfolio(returns, covariance, risk_free_rate, bounds):
 
     return result
 
-def get_bounds(tickers, max_weight):
+def get_bounds(tickers, lower_bound, upper_bound):
   # for ETF, the allowed weight is between 0 and 20%
   # for stocks, the allowed weight is between 0 and 10%
   num_assets = len(tickers)
   if num_assets == 0:
     return None
 
-  bounds = tuple((0.0, max_weight) for ticker in tickers)
+  bounds = tuple((lower_bound, upper_bound) for ticker in tickers)
   return bounds
 
-def do_optimization(mu, S, final_tickers, period, max_weight):
+
+def do_optimization(mu, S, final_tickers, period, lower_bound, upper_bound):
   riskfree_log_return = np.log(1 + INTEREST_RATE) * period / ANNUAL_TRADING_DAYS
-  bounds = get_bounds(final_tickers, max_weight)
+  bounds = get_bounds(final_tickers, lower_bound, upper_bound)
   raw_weights = optimize_portfolio(mu, S, riskfree_log_return, bounds)
   weights = raw_weights.x
   
   tickers_to_buy = []
   for index, ticker_name in enumerate(final_tickers):
     weight = weights[index]
-    if weight > 1e-3:
-      print(f'index: {index} {ticker_name}: weight {weight} exp profit: {mu[index]}, variance: {S[ticker_name][ticker_name]}')
+    if weight > 1e-3 or weight < -1e-3:
+      logger.info(f'index: {index} {ticker_name}: weight {weight} exp profit: {mu[index]}, variance: {S[ticker_name][ticker_name]}')
       ticker_info = {'id': ticker_name, 'weight': weight}
       tickers_to_buy.append(ticker_info)
 
-  print(f'expected return in {period} trading days: {portfolio_return(weights, mu)}')
-  print(f'volatility of the return in {period} trading days: {portfolio_volatility(weights, S)}')
+  logger.info(f'expected return in {period} trading days: {portfolio_return(weights, mu)}')
+  logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(weights, S)}')
   # print tickers_to_buy in JSON format
 
   tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)

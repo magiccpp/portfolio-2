@@ -1,4 +1,4 @@
-from util import generate_features, get_doubled_matrix, load_pkl, load_latest_price_data, add_features, merge_fred, portfolio_log_return, portfolio_return, portfolio_volatility, portfolio_volatility_log_return, remove_nan
+from util import do_optimization, generate_features, get_doubled_matrix, load_pkl, load_latest_price_data, add_features, merge_fred, portfolio_log_return, portfolio_return, portfolio_volatility, portfolio_volatility_log_return, remove_nan
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_squared_error
@@ -71,40 +71,6 @@ def min_func_sharpe(weights, returns, covariance, risk_free_rate):
     sharpe_ratio = (portfolio_ret - risk_free_rate) / portfolio_vol
     return -sharpe_ratio # Negate Sharpe ratio because we minimize the function
 
-def min_func_one_sigma(weights, returns, covariance, risk_free_rate):
-  portfolio_ret = portfolio_log_return(weights, returns)
-  portfolio_vol = portfolio_volatility_log_return(weights, covariance)
-  return -(portfolio_ret - risk_free_rate - portfolio_vol)
-
-def optimize_portfolio(returns, covariance, risk_free_rate, bounds):
-    num_assets = len(returns)
-    args = (returns, covariance, risk_free_rate)
-
-    # Define constraints
-    def constraint_sum(weights):
-        return np.sum(weights) - 1 
-    
-    constraints = [{'type': 'eq', 'fun': constraint_sum}]
-
-
-    # Perform optimization
-    def objective(weights):
-        return min_func_one_sigma(weights, returns, covariance, risk_free_rate)
-    
-    iteration = [0]  # mutable container to store iteration count
-    def callback(weights):
-        iteration[0] += 1
-        
-        print(f"Iteration: {iteration[0]}, value: {objective(weights)}")
-
-    # Initial guess (equal weights)
-    initial_guess = num_assets * [1. / num_assets]
-
-    # Perform optimization
-    result = minimize(objective, initial_guess, 
-                      method='SLSQP', bounds=bounds, constraints=constraints, callback=callback, options={'maxiter': 100})
-
-    return result
 
 
 def get_shrinkage_covariance(df):
@@ -114,37 +80,6 @@ def get_shrinkage_covariance(df):
     shrink_cov = pd.DataFrame(lw.covariance_, index=df.columns, columns=df.columns)
     return shrink_cov
 
-def get_bounds(tickers, lower_bound, upper_bound):
-  # for ETF, the allowed weight is between 0 and 20%
-  # for stocks, the allowed weight is between 0 and 10%
-  num_assets = len(tickers)
-  if num_assets == 0:
-    return None
-
-  bounds = tuple((lower_bound, upper_bound) for ticker in tickers)
-  return bounds
-
-def do_optimization(mu, S, final_tickers, period, lower_bound, upper_bound):
-  riskfree_log_return = np.log(1 + INTEREST_RATE) * period / ANNUAL_TRADING_DAYS
-  bounds = get_bounds(final_tickers, lower_bound, upper_bound)
-  raw_weights = optimize_portfolio(mu, S, riskfree_log_return, bounds)
-  weights = raw_weights.x
-  
-  tickers_to_buy = []
-  for index, ticker_name in enumerate(final_tickers):
-    weight = weights[index]
-    if weight > 1e-3:
-      logger.info(f'index: {index} {ticker_name}: weight {weight} exp profit: {mu[index]}, variance: {S[ticker_name][ticker_name]}')
-      ticker_info = {'id': ticker_name, 'weight': weight}
-      tickers_to_buy.append(ticker_info)
-
-  logger.info(f'expected return in {period} trading days: {portfolio_return(weights, mu)}')
-  logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(weights, S)}')
-  # print tickers_to_buy in JSON format
-
-  tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
-  print(tickers_to_buy_json)
-  return tickers_to_buy_json
 
 
 def main(argv):
