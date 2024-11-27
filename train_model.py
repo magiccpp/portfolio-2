@@ -60,7 +60,8 @@ TIMEOUT = 120
 # number of trials to do the hyper-parameter optimization
 N_TRIALS = 50
 
-tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('ssec.txt') + get_tickers('cac_40.txt') + get_tickers('etf.txt')
+# get_tickers('ssec.txt')
+tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('cac_40.txt') + get_tickers('etf.txt')
 selected_tickers = tickers
 
 
@@ -245,7 +246,7 @@ def test_naive(valid_tickers, df_test_X_all, df_test_y_all, period):
   logger.info(f'The MSE of using inverse of last period as prediction: {np.mean(naive_mses_negation)}, std: {np.std(naive_mses_negation)}')
   logger.info(f'The MSE of using average of 512 days: {np.mean(naive_mses_avg_512)}, std: {np.std(naive_mses_avg_512)}')
 
-def test_all(data_dir, best_pipeline_svm, best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all):
+def test_all(data_dir, best_pipeline_svm, best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period):
   mses_rf = []
   mses_svm = []
   mses_naive = []
@@ -279,7 +280,6 @@ def test_all(data_dir, best_pipeline_svm, best_pipeline_rf, valid_tickers, df_tr
       pickle.dump(best_pipeline_rf, f)
 
     # compute the naive prediction
-    period = 128
     divisor = 512 / period
     df_test_X_naive = pd.concat((df_train_X[-512:], df_test_X))
     y_pred_naive = df_test_X_naive[f'log_price_diff_512'].rolling(window=512).mean()[512:] / divisor
@@ -430,15 +430,16 @@ def main(argv):
   iterations = 10
   try:
       # delete: delete the previous study
-      opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "svr_iter=", "rf_iter=", "reload", "delete_svr", "delete_rf", "skip_test"])
+      opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "svr_iter=", "rf_iter=", "reload", "delete_svr", "delete_rf", "skip_test", "generate_feature_file"])
   except getopt.GetoptError:
-    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete_svr --delete_rf --skip_test')
+    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete_svr --delete_rf --skip_test --generate_feature_file')
     sys.exit(2)
 
   reload_data = False
   delete_svr_study = False
   delete_rf_study = False
   skip_test = False
+  generate_feature_file = False
   for opt, arg in opts:
     if opt in ("-p", "--period"):
         period = int(arg)
@@ -454,6 +455,9 @@ def main(argv):
         delete_rf_study = True
     elif opt in ("--skip_test"):
         skip_test = True
+    elif opt in ("--generate_feature_file"):
+        generate_feature_file = True
+
 
   if period is None:
     logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete')
@@ -489,7 +493,7 @@ def main(argv):
   data_dir = f'./processed_data_{period}'
   feature_file_path = f'./{data_dir}/sorted_features.txt'
   
-  if not os.path.exists(feature_file_path):
+  if not os.path.exists(feature_file_path) or generate_feature_file:
     print('generating features...')
     sorted_features = generate_features(data_dir, df_train_X_all, df_train_y_all, valid_tickers)
   else:
@@ -542,7 +546,7 @@ def main(argv):
   logger.info(f'Starting test')
   test_naive(valid_tickers, df_test_X_all, df_test_y_all, period)
   #test_rf(best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
-  test_all(data_dir, best_pipeline_rf, best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
+  test_all(data_dir, best_pipeline_rf, best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period)
   #test_svm(best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
   
 if __name__ == "__main__":

@@ -162,10 +162,10 @@ def add_features(df, n_features):
 
     df[f'log_price_diff_{n_days}'] = np.log(df['Adj Close']/df['Adj Close'].shift(n_days))
     #df[f'price_diff_{n_days}'] = pd.to_numeric(df[f'price_diff_{n_days}'], errors='coerce')
-    log_volume = np.log(df['Volume']+1e-8)
-    df[f'log_volume_diff_{n_days}'] = log_volume - log_volume.shift(n_days)
+    #log_volume = np.log(df['Volume']+1e-8)
+    #df[f'log_volume_diff_{n_days}'] = log_volume - log_volume.shift(n_days)
     feature_columns.append(f'log_price_diff_{n_days}')
-    feature_columns.append(f'log_volume_diff_{n_days}')
+    #feature_columns.append(f'log_volume_diff_{n_days}')
     #feature_columns.append(f'volume_diff_{n_days}')
   return df, feature_columns
 
