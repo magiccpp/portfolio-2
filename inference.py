@@ -88,16 +88,19 @@ def main(argv):
   iterations = 50
   update_covariance = True
   allow_short = True
+  retrain = True
   try:
-      opts, args = getopt.getopt(argv, "p:u", ["period=", "no-update-covariance"])
+      opts, args = getopt.getopt(argv, "p:u", ["period=", "no-update-covariance", "no-retrain"])
   except getopt.GetoptError:
-    logger.error('usage: python inference.py --period=<days> --no-update-covariance')
+    logger.error('usage: python inference.py --period=<days> --no-update-covariance --no-retrain')
     sys.exit(2)
   for opt, arg in opts:
     if opt in ("-p", "--period"):
       period = int(arg)
     elif opt in ("-u", "--no-update-covariance"):
       update_covariance = False
+    elif opt in ("--no-retrain"):
+      retrain = False
 
 
   if period is None:
@@ -188,7 +191,7 @@ def main(argv):
       rf_model_path = f'{data_dir}/models/{stock_name}_rf.pkl'
       svr_model_path = f'{data_dir}/models/{stock_name}_svr.pkl'
 
-      if os.path.exists(rf_model_path):
+      if os.path.exists(rf_model_path) and not retrain:
         best_pipeline_rf = load_pkl(rf_model_path)
       else:
         print(f"retraining rf for stock: {stock_name}")
@@ -196,7 +199,7 @@ def main(argv):
         best_pipeline_rf.fit(X_train, y_train)
         save_pkl(best_pipeline_rf, rf_model_path)
 
-      if os.path.exists(svr_model_path):
+      if os.path.exists(svr_model_path) and not retrain:
         best_pipeline_svr = load_pkl(svr_model_path)
       else:
         print(f"retraining svr for stock: {stock_name}")
