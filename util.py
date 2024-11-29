@@ -428,7 +428,7 @@ def create_if_not_exist(path):
 
 def portfolio_volatility_log_return(weights, covariance):
     return np.sqrt(np.dot(weights.T, np.dot(covariance, weights)))
-
+ 
 def portfolio_log_return(weights, returns):
     return np.sum(returns*weights)
 
@@ -537,9 +537,9 @@ def get_bounds(tickers, lower_bound, upper_bound):
   return bounds
 
 
-def do_optimization(mu, S, final_tickers, period, lower_bound, upper_bound):
+def do_optimization(mu, S, final_tickers, period, upper_bound):
   riskfree_log_return = np.log(1 + INTEREST_RATE) * period / ANNUAL_TRADING_DAYS
-  bounds = get_bounds(final_tickers, lower_bound, upper_bound)
+  bounds = get_bounds(final_tickers, 0, upper_bound)
   raw_weights = optimize_portfolio(mu, S, riskfree_log_return, bounds)
   weights = raw_weights.x
   
@@ -591,3 +591,17 @@ def get_doubled_matrix(S):
     S_prime = pd.DataFrame(S_prime_array, columns=new_columns, index=new_index)
     
     return S_prime
+
+
+def get_errors_mu_short(all_errors, mu):
+  # for those stocks that have negative log return in mu, we need to reverse the sign of the error
+  errors = all_errors.copy()
+  # Iterate over mu and all_errors together using enumerate
+  for i, log_return in enumerate(mu):
+      # Check if the log return is negative
+      if log_return < 0:
+          stock_name = all_errors.columns[i]
+          # Reverse the sign of the corresponding error
+          errors[stock_name] = -errors[stock_name]
+
+  return errors, np.abs(mu)

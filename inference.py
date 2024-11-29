@@ -301,7 +301,7 @@ def main(argv):
     for ticker in final_tickers:
       f.write(f'{ticker}\n')
 
-  ticket_to_buy_json = do_optimization(mu, S, final_tickers, period, 0, 0.02)
+  ticket_to_buy_json = do_optimization(mu, S, final_tickers, period, 0.02, allow_short=False)
 
   # create the directory if not exists
   if not os.path.exists(f'{data_dir}/computed_portfolios'):
@@ -312,7 +312,11 @@ def main(argv):
 
   # allow short operations.
   if allow_short:
-    ticket_to_buy_json = do_optimization(mu, S, final_tickers, period, -0.02, 0.02)
+    all_errors_short, mu_positive = get_errors_mu_short(all_errors, mu)
+    S_short = get_shrinkage_covariance(all_errors_short)
+
+
+    ticket_to_buy_json = do_optimization(mu_positive, S_short, final_tickers, period, 0.02, allow_short=True)
 
     # create the directory if not exists
     if not os.path.exists(f'{data_dir}/computed_portfolios_short'):
