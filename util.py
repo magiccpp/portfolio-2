@@ -554,10 +554,8 @@ def do_optimization(mu, S, final_tickers, period, upper_bound):
   logger.info(f'expected return in {period} trading days: {portfolio_return(weights, mu)}')
   logger.info(f'volatility of the return in {period} trading days: {portfolio_volatility(weights, S)}')
   # print tickers_to_buy in JSON format
+  return tickers_to_buy
 
-  tickers_to_buy_json = json.dumps(tickers_to_buy, indent=4)
-  print(tickers_to_buy_json)
-  return tickers_to_buy_json
 
 
 
@@ -605,3 +603,23 @@ def get_errors_mu_short(all_errors, mu):
           errors[stock_name] = -errors[stock_name]
 
   return errors, np.abs(mu)
+
+
+def save_json_to_dir(ticket_to_buy_json, out_dir):
+  if not os.path.exists(out_dir):
+    os.makedirs(out_dir)
+  cur_date = pd.Timestamp.now().strftime('%Y%m%d')
+  with open(f'{out_dir}/ticket_to_buy_{cur_date}.json', 'w') as f:
+    json.dump(ticket_to_buy_json, f)
+
+
+def update_stock_operation_and_weight(stock, index, mu):
+    """
+    Updates the operation and weight of a stock based on the mu value.
+    """
+    if mu[index] < 0:
+        stock['operation'] = 'short'
+        stock['weight'] = -stock['weight']
+    else:
+        stock['operation'] = 'long'
+    return stock['weight']

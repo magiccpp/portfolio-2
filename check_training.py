@@ -56,6 +56,8 @@ def get_latest_file(multi_horizon_dir):
     files = os.listdir(multi_horizon_dir)
     files = [f for f in files if re.match(r'(.*)\.json', f)]
     files = sorted(files, key=lambda x: datetime.strptime(x.split('_')[-1].split('.')[0], '%Y%m%d'))
+    if len(files) == 0:
+        return None    
     return files[-1]
 
 def verify_weights(weight_file):
@@ -86,18 +88,22 @@ def verify_weights(weight_file):
 dir = './multi_horizon_short/'
 print(f'Checking the latest file in {dir}')
 latest_file = get_latest_file(dir)
-verify_weights(f"{dir}/{latest_file}")
+if latest_file is not None:
+    verify_weights(f"{dir}/{latest_file}")
+
 
 dir = './processed_data_128/computed_portfolios_short/'
 print(f'Checking the latest file in {dir}')
 latest_file = get_latest_file(dir)
-verify_weights(f"{dir}/{latest_file}")
+if latest_file is not None:
+    verify_weights(f"{dir}/{latest_file}")
 
 
 dir = './processed_data_128/computed_portfolios/'
 print(f'Checking the latest file in {dir}')
 latest_file = get_latest_file(dir)
-verify_weights(f"{dir}/{latest_file}")
+if latest_file is not None:
+    verify_weights(f"{dir}/{latest_file}")
 
 
 

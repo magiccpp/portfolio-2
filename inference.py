@@ -1,4 +1,4 @@
-from util import do_optimization, generate_features, get_doubled_matrix, load_pkl, load_latest_price_data, add_features, merge_fred, portfolio_log_return, portfolio_return, portfolio_volatility, portfolio_volatility_log_return, remove_nan
+from util import do_optimization, generate_features, get_doubled_matrix, get_errors_mu_short, load_pkl, load_latest_price_data, add_features, merge_fred, portfolio_log_return, portfolio_return, portfolio_volatility, portfolio_volatility_log_return, remove_nan, save_json_to_dir, update_stock_operation_and_weight
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_squared_error
@@ -79,7 +79,6 @@ def get_shrinkage_covariance(df):
     # Convert the ndarray back to a DataFrame and use the column and index from the original DataFrame
     shrink_cov = pd.DataFrame(lw.covariance_, index=df.columns, columns=df.columns)
     return shrink_cov
-
 
 
 def main(argv):
@@ -301,29 +300,31 @@ def main(argv):
     for ticker in final_tickers:
       f.write(f'{ticker}\n')
 
-  ticket_to_buy_json = do_optimization(mu, S, final_tickers, period, 0.02, allow_short=False)
+  ticket_to_buy = do_optimization(mu, S, final_tickers, period, 0.02)
 
-  # create the directory if not exists
-  if not os.path.exists(f'{data_dir}/computed_portfolios'):
-    os.makedirs(f'{data_dir}/computed_portfolios')
-
-  with open(f'{data_dir}/computed_portfolios/tickers_to_buy_{cur_date}.json', 'w') as f:
-    f.write(ticket_to_buy_json)
+  save_json_to_dir(ticket_to_buy, f'{data_dir}/computed_portfolios')
 
   # allow short operations.
   if allow_short:
     all_errors_short, mu_positive = get_errors_mu_short(all_errors, mu)
     S_short = get_shrinkage_covariance(all_errors_short)
 
+    ticket_to_buy_short = do_optimization(mu_positive, S_short, final_tickers, period, 0.02)
+    # add the operation direction.
 
-    ticket_to_buy_json = do_optimization(mu_positive, S_short, final_tickers, period, 0.02, allow_short=True)
+    weight_short = 0
+    weight_long = 0
 
-    # create the directory if not exists
-    if not os.path.exists(f'{data_dir}/computed_portfolios_short'):
-      os.makedirs(f'{data_dir}/computed_portfolios_short')
+    for stock in ticket_to_buy_short:
+        index = final_tickers.index(stock['id'])
+        updated_weight =  update_stock_operation_and_weight(stock, index, mu)
+        if updated_weight < 0:
+            weight_short += updated_weight
+        else:
+            weight_long += updated_weight
 
-    with open(f'{data_dir}/computed_portfolios_short/tickers_to_buy_{cur_date}.json', 'w') as f:
-      f.write(ticket_to_buy_json)
+    print(f"Short weight: {weight_short}, Long weight: {weight_long}")
+    save_json_to_dir(ticket_to_buy_short, f'{data_dir}/computed_portfolios_short')
 
 if __name__ == "__main__":
     main(sys.argv[1:])
