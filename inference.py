@@ -284,7 +284,8 @@ def main(argv):
   #S = all_errors.cov()
   #S = CovarianceShrinkage(all_errors).ledoit_wolf()
   mu = exp_profits
-
+  mu_errors = all_errors.mean()
+  mu = mu - mu_errors
   # to save S and mu
 
   # save the result
