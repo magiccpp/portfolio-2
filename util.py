@@ -19,7 +19,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.base import BaseEstimator, TransformerMixin
 from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
-yfin.pdr_override()
+
 import logging
 
 logger = logging.getLogger('inference')
@@ -59,7 +59,7 @@ def nth_weekday_of_month(year, month, index, weekday):
   first_day_of_month = pd.Timestamp(year=year, month=month, day=1)
   # Find the first occurrence of the specific weekday
   first_weekday = first_day_of_month + timedelta(days=((weekday - first_day_of_month.weekday()) + 7) % 7)
-  
+
   # Add (index - 1) weeks to the first occurrence of the weekday
   nth_weekday = first_weekday + timedelta(weeks=index-1)
   return nth_weekday.day
@@ -70,7 +70,7 @@ def is_file_downloaded_recently(file_path, seconds=NUMBER_RECENT_SECONDS):
   file_age = time.time() - os.path.getmtime(file_path)
   return file_age <= seconds
 
-def get_table_by_id_fred(id, path, n_features, 
+def get_table_by_id_fred(id, path, n_features,
                          start='1950-01-01', end="2024-01-01", if_log=True):
   feature_columns = []
   if path is None:
@@ -102,7 +102,7 @@ def get_table_by_id_fred(id, path, n_features,
 def merge_fred(df, id, n_features, start, end, release_week_index, release_week_day, if_log=True):
   path = 'data/fred'
   df_new, columns = get_table_by_id_fred(id, path, n_features, start=start, end=end, if_log=if_log)
-  
+
 
   def get_last_metric_date(row, release_week_index, release_week_day):
     year = row.name.year
@@ -125,12 +125,12 @@ def merge_fred(df, id, n_features, start, end, release_week_index, release_week_
         month = 12
       else:
         month -= 1
-    
+
     return pd.to_datetime(f"{year}-{month}-01")
-  
-  df['LAST_METRIC_DATE'] = df.apply(get_last_metric_date, axis=1, 
+
+  df['LAST_METRIC_DATE'] = df.apply(get_last_metric_date, axis=1,
                                     args=(release_week_index, release_week_day))
-  
+
   df = pd.merge_asof(df, df_new[columns], left_on='LAST_METRIC_DATE', right_index=True)
   # delete the column 'LAST_METRIC_DATE'
   df = df.drop(columns=['LAST_METRIC_DATE'])
@@ -145,7 +145,7 @@ def remove_nan(df, type='top'):
     df = df[i:]
 
     return df, df_top
-  
+
   elif type == 'bottom':
     for i in range(1, len(df)):
       if df.iloc[-i].isnull().any() == False:
@@ -153,7 +153,7 @@ def remove_nan(df, type='top'):
     df_tail = df[-i:]
     df = df[:-i]
     return df, df_tail
-  
+
 
 def add_features(df, n_features):
   feature_columns = []
@@ -202,16 +202,23 @@ def read_and_filter(exchange_name, exchange_name_yahoo, path):
   if not is_file_downloaded_recently(filepath):
     print(f'Metric: {exchange_name} need to be refreshed...')
     df = pdr.get_data_fred(exchange_name, start='1950-01-01', end=None)
-
+    print('df:')
+    print(df)
+    print(df.columns)
     # fred data is out of date, we use yahoo data as complement
-    df2 = pdr.get_data_yahoo(exchange_name_yahoo, start='1950-01-01', end=None)
-
+    df2 = yfin.download(exchange_name_yahoo, start='1950-01-01', end=None)
+    print('df2:')
+    print(df2)
+    print(df2.columns)
+    # remove the second index of df2
+    if isinstance(df2.columns, pd.MultiIndex):
+      df2.columns = df2.columns.get_level_values(0)
     index_name = df.index.name
-    df = df.join(df2[['Adj Close']], how='outer')
+    df = df.join(df2[['Close']], how='outer')
     df.index.name = index_name
 
-    df[exchange_name].fillna(df['Adj Close'], inplace=True)
-    df.drop('Adj Close', axis=1, inplace=True)
+    df[exchange_name].fillna(df['Close'], inplace=True)
+    df.drop('Close', axis=1, inplace=True)
     df.dropna(inplace=True)
     df.to_csv(f'{path}/{exchange_name}.csv')
 
@@ -228,8 +235,8 @@ def convert(df, exchange_name, inversion, exchange_name_yahoo):
   if inversion:
     df_rate[exchange_name] = 1/df_rate[exchange_name]
   df_merged = pd.merge_asof(df, df_rate, left_index=True, right_index=True, direction='nearest')
-  df_merged['Adj Close'] = df_merged['Adj Close'] * df_merged[exchange_name]
-  return df_merged[['Adj Close', 'Volume']]
+  df_merged['Close'] = df_merged['Close'] * df_merged[exchange_name]
+  return df_merged[['Close', 'Volume']]
 
 
 class FileLock:
@@ -265,7 +272,7 @@ class FileLock:
 
 def load_latest_price_data(stock_name, start='1950-01-01', end=None, save=True, force_download=False):
   file_path = f'data/prices/{stock_name}.csv'
-  
+
   if end is not None:
     # get the number of seconds from end to now
     now = pd.Timestamp.now()
@@ -279,7 +286,7 @@ def load_latest_price_data(stock_name, start='1950-01-01', end=None, save=True, 
     if not is_file_downloaded_recently(file_path, seconds=seconds) or force_download:
       print('Preparing downloading:', stock_name)
       data = pdr.get_data_yahoo(stock_name, start=start, end=None, timeout=40)
-      
+
       if len(data) > 100:
         if save:
           data.to_csv(file_path)
@@ -291,7 +298,7 @@ def load_latest_price_data(stock_name, start='1950-01-01', end=None, save=True, 
 
   if len(df) < 100:
     return None
-  
+
   stock_suffix = '.' + stock_name.split('.')[-1]
   exchange_name, needs_inversion, exchange_name_yahoo = get_currency_pair(stock_suffix, 'USD')
   if exchange_name is not None:
@@ -305,21 +312,21 @@ def   get_X_y_by_stock(stock_name, period, start, end, split_date, force_downloa
   except FileNotFoundError:
     print(f'Cannot find data for: {stock_name}')
     return None, None, None, None
-  
+
   print(f'processing {stock_name}...')
   if df is None or len(df) < MIN_TOTAL_DATA_PER_STOCK:
     print(f'Cannot find enough data for: {stock_name}')
     return None, None, None, None
-    
+
   if len(df) == 0:
     print(f'empty table...')
     return None, None, None, None
 
   df, feature_columns = add_features(df, 10)
-  
+
   # the predict is the log return of period days.
   df['log_predict'] = np.log(df['Adj Close'].shift(-period) / df['Adj Close'])
-  
+
 
   timestamp = df.index[0]
   earliest_date = timestamp.strftime('%Y-%m-%d')
@@ -331,7 +338,7 @@ def   get_X_y_by_stock(stock_name, period, start, end, split_date, force_downloa
   df, columns = merge_fred(df, 'M2SL', 6, start, end, 4, 2, if_log=True)
   feature_columns += columns
 
-  
+
   df, columns = merge_fred(df, 'UNRATE', 6, start, end, 1, 5, if_log=False)
   feature_columns += columns
 
@@ -346,14 +353,14 @@ def   get_X_y_by_stock(stock_name, period, start, end, split_date, force_downloa
   if len(df) < MIN_TOTAL_DATA_PER_STOCK:
     print(f'Cannot find enough data for: {stock_name} after removing nan from the bottom')
     return None, None, None, None
-  
+
   df = df[feature_columns + ['log_predict']]
   df.dropna(inplace=True)
-  
+
   if len(df) < MIN_TOTAL_DATA_PER_STOCK:
     print(f'Cannot find enough data for: {stock_name}')
     return None, None, None, None
-  
+
   df_test = df[df.index >= split_date]
   df_train = df[df.index < split_date]
 
@@ -378,7 +385,7 @@ def save_pkl(object, file):
 def load_pkl(file):
   with open(file, 'rb') as f:
     return pickle.load(f)
-  
+
 
 class TruncationTransformer(BaseEstimator, TransformerMixin):
   def __init__(self, k):
@@ -404,7 +411,7 @@ def get_pipline_rf(params):
             max_leaf_nodes=params['max_leaf_nodes'],
             timeout=TIMEOUT
       ))])
-  
+
   return pipeline
 
 
@@ -413,11 +420,11 @@ def get_pipline_svr(params):
           ('scaler', StandardScaler()),  # Add scaler here
           ('truncate', TruncationTransformer(k=params['k'])), # Adjust 'k' as needed
           ('regress', SafeSVR(
-            C=params['C'], 
+            C=params['C'],
             epsilon=params['epsilon'], kernel=params['kernel'],
             gamma=params['gamma'], timeout=TIMEOUT
       ))])
-  
+
   return pipeline
 
 def create_if_not_exist(path):
@@ -428,7 +435,7 @@ def create_if_not_exist(path):
 
 def portfolio_volatility_log_return(weights, covariance):
     return np.sqrt(np.dot(weights.T, np.dot(covariance, weights)))
- 
+
 def portfolio_log_return(weights, returns):
     return np.sum(returns*weights)
 
@@ -465,7 +472,7 @@ def generate_features(data_dir, df_train_X_all, df_train_y_all, valid_tickers):
       coefficients += model.coef_
 
       # Mapping back to feature names (assuming you have a list of feature names)
-      
+
   sorted_scores = np.abs(coefficients).argsort()[::-1]  # Sort indices in descending order of scores
   feature_names = np.array(feature_names)
   sorted_features = feature_names[sorted_scores]
@@ -502,26 +509,26 @@ def optimize_portfolio(returns, covariance, risk_free_rate, bounds):
 
     # Define constraints
     def constraint_sum(weights):
-        return np.sum(np.abs(weights)) - 1 
-    
+        return np.sum(np.abs(weights)) - 1
+
     constraints = [{'type': 'eq', 'fun': constraint_sum}]
 
 
     # Perform optimization
     def objective(weights):
         return min_func_one_sigma(weights, returns, covariance, risk_free_rate)
-    
+
     iteration = [0]  # mutable container to store iteration count
     def callback(weights):
         iteration[0] += 1
-        
+
         print(f"Iteration: {iteration[0]}, value: {objective(weights)}")
 
     # Initial guess (equal weights)
     initial_guess = num_assets * [1. / num_assets]
 
     # Perform optimization
-    result = minimize(objective, initial_guess, 
+    result = minimize(objective, initial_guess,
                       method='SLSQP', bounds=bounds, constraints=constraints, callback=callback, options={'maxiter': 100})
 
     return result
@@ -542,7 +549,7 @@ def do_optimization(mu, S, final_tickers, period, upper_bound):
   bounds = get_bounds(final_tickers, 0, upper_bound)
   raw_weights = optimize_portfolio(mu, S, riskfree_log_return, bounds)
   weights = raw_weights.x
-  
+
   tickers_to_buy = []
   for index, ticker_name in enumerate(final_tickers):
     weight = weights[index]
@@ -569,25 +576,25 @@ def get_shrinkage_covariance(df):
 
 def get_doubled_matrix(S):
     m = S.shape[0]  # Assuming S is a square matrix
-    
+
     # Create the numpy array for S_prime
     S_prime_array = np.zeros((2*m, 2*m))
     S_prime_array[:m, :m] = S
     S_prime_array[m:, m:] = S
     S_prime_array[:m, m:] = -S
     S_prime_array[m:, :m] = -S
-    
+
     # Get the original column and index names
     original_columns = S.columns
     original_index = S.index
-    
+
     # Create new column and index names
     new_columns = list(original_columns) + [f'-{col}' for col in original_columns]
     new_index = list(original_index) + [f'-{idx}' for idx in original_index]
-    
+
     # Create the new DataFrame with appropriate column and index names
     S_prime = pd.DataFrame(S_prime_array, columns=new_columns, index=new_index)
-    
+
     return S_prime
 
 

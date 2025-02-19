@@ -16,6 +16,8 @@ def process_json_files(input_directory, output_file):
     # Initialize a default dictionary to accumulate weights per stock ID
     total_weights = defaultdict(float)
 
+
+
     # Use glob to find all JSON files in the directory
     json_pattern = os.path.join(input_directory, '*.json')
     json_files = glob.glob(json_pattern)
@@ -26,6 +28,7 @@ def process_json_files(input_directory, output_file):
 
     # Process each JSON file
     for file_path in json_files:
+        print(f"Processing file: {file_path}")
         try:
             with open(file_path, 'r') as file:
                 data = json.load(file)
@@ -47,9 +50,12 @@ def process_json_files(input_directory, output_file):
                     continue
 
                 if operation.lower() == 'short':
+                    print(f'id={stock_id} weight={weight} operation={operation}')
                     weight = -weight  # Treat short as negative weight
 
+
                 total_weights[stock_id] += weight
+                print(f"Stock ID: {stock_id}, weight={weight}")
 
         except json.JSONDecodeError:
             print(f"Error decoding JSON in file: {file_path}")
@@ -62,7 +68,7 @@ def process_json_files(input_directory, output_file):
 
     # Calculate the total sum of absolute weights for normalization
     sum_abs_weights = sum(abs(w) for w in total_weights.values())
-
+    print(f"Total sum of absolute weights: {sum_abs_weights}")
     if sum_abs_weights == 0:
         print("Total sum of absolute weights is zero. Cannot normalize.")
         return
@@ -71,7 +77,7 @@ def process_json_files(input_directory, output_file):
     normalized_data = []
     for stock_id, weight in total_weights.items():
         normalized_weight = weight / sum_abs_weights
-
+        print(f"Stock ID: {stock_id}, weight={weight} Normalized Weight: {normalized_weight}")
         if normalized_weight < 0:
             normalized_entry = {
                 "id": stock_id,

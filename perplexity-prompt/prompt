@@ -1,0 +1,97 @@
+
+Below is my current portfolio, you can update it if it is necessary based on latest information.
+[
+  {
+    "id": "CRDO",
+    "weight": 0.1022715650958512,
+    "operation": "long"
+  },
+  {
+    "id": "CORT",
+    "weight": 0.1022715650958512,
+    "operation": "long"
+  },
+  {
+    "id": "SMCI",
+    "weight": 0.1022715650958512,
+    "operation": "long"
+  },
+  {
+    "id": "AZN",
+    "weight": 0.1022715650958512,
+    "operation": "long"
+  },
+  {
+    "id": "INTC",
+    "weight": 0.1022715650958512,
+    "operation": "short"
+  },
+  {
+    "id": "CRM",
+    "weight": 0.05682889967159464,
+    "operation": "long"
+  },
+  {
+    "id": "SNPS",
+    "weight": 0.05682889967159464,
+    "operation": "long"
+  },
+  {
+    "id": "CACC",
+    "weight": 0.04546539243872229,
+    "operation": "long"
+  },
+  {
+    "id": "DELL",
+    "weight": 0.068192406904467,
+    "operation": "short"
+  },
+  {
+    "id": "PVL",
+    "weight": 0.068192406904467,
+    "operation": "short"
+  },
+  {
+    "id": "TGT",
+    "weight": 0.03407915819138419,
+    "operation": "long"
+  },
+  {
+    "id": "AMT",
+    "weight": 0.03407915819138419,
+    "operation": "long"
+  },
+  {
+    "id": "ATAT",
+    "weight": 0.03407915819138419,
+    "operation": "long"
+  },
+  {
+    "id": "MSTR",
+    "weight": 0.06816967989000125,
+    "operation": "long"
+  },
+  {
+    "id": "WBA",
+    "weight": 0.022727014465744707,
+    "operation": "long"
+  }
+]
+
+The stocks are chosen from US and Europe stock market where the companies meet the following criteria:
+- what the best investors are investing in
+- large insider ownership
+- insider buying
+- founder run/entrepreneurial founder
+- wide moat/moat
+- market leader or "second best"
+- good CEO and management with high ratings on Glassdoor/(comparably?) and positive business outlook there
+- good board
+- large cash flow/lower debt
+- a strong brand/pricing power (important when inflation...)
+- competitors? Risk of disruption?
+- industry with room to grow? / immature market/maturing market/slowing growth=dangerous.
+- sector preferably tech/pharma/defence which has high margins and growth
+- avoid capital-heavy, commodity-dependent, interest-dependent, salary-dependent industries
+
+Your updated portfolio should be in the same json format as the input.
