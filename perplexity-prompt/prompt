@@ -3,77 +3,77 @@ Below is my current portfolio, you can update it if it is necessary based on lat
 [
   {
     "id": "CRDO",
-    "weight": 0.1022715650958512,
-    "operation": "long"
-  },
-  {
-    "id": "CORT",
-    "weight": 0.1022715650958512,
+    "weight": 0.10076702364059888,
     "operation": "long"
   },
   {
     "id": "SMCI",
-    "weight": 0.1022715650958512,
+    "weight": 0.0996348098918281,
     "operation": "long"
   },
   {
     "id": "AZN",
-    "weight": 0.1022715650958512,
-    "operation": "long"
-  },
-  {
-    "id": "INTC",
-    "weight": 0.1022715650958512,
-    "operation": "short"
-  },
-  {
-    "id": "CRM",
-    "weight": 0.05682889967159464,
-    "operation": "long"
-  },
-  {
-    "id": "SNPS",
-    "weight": 0.05682889967159464,
-    "operation": "long"
-  },
-  {
-    "id": "CACC",
-    "weight": 0.04546539243872229,
-    "operation": "long"
-  },
-  {
-    "id": "DELL",
-    "weight": 0.068192406904467,
-    "operation": "short"
-  },
-  {
-    "id": "PVL",
-    "weight": 0.068192406904467,
-    "operation": "short"
-  },
-  {
-    "id": "TGT",
-    "weight": 0.03407915819138419,
-    "operation": "long"
-  },
-  {
-    "id": "AMT",
-    "weight": 0.03407915819138419,
+    "weight": 0.136637219022318,
     "operation": "long"
   },
   {
     "id": "ATAT",
-    "weight": 0.03407915819138419,
+    "weight": 0.05459958988853521,
+    "operation": "long"
+  },
+  {
+    "id": "INTC",
+    "weight": 0.1041636648869112,
+    "operation": "short"
+  },
+  {
+    "id": "DELL",
+    "weight": 0.08430205663132437,
+    "operation": "short"
+  },
+  {
+    "id": "SNPS",
+    "weight": 0.04528854995083096,
+    "operation": "long"
+  },
+  {
+    "id": "CACC",
+    "weight": 0.053938230181920364,
     "operation": "long"
   },
   {
     "id": "MSTR",
-    "weight": 0.06816967989000125,
+    "weight": 0.08882319207493347,
+    "operation": "long"
+  },
+  {
+    "id": "PVL",
+    "weight": 0.06165778165590889,
+    "operation": "short"
+  },
+  {
+    "id": "CRM",
+    "weight": 0.057798005918914624,
+    "operation": "long"
+  },
+  {
+    "id": "TGT",
+    "weight": 0.036484169908202815,
+    "operation": "long"
+  },
+  {
+    "id": "AMT",
+    "weight": 0.02402981867172431,
     "operation": "long"
   },
   {
     "id": "WBA",
-    "weight": 0.022727014465744707,
+    "weight": 0.015645047715383942,
+    "operation": "long"
+  },
+  {
+    "id": "CORT",
+    "weight": 0.036230839960664764,
     "operation": "long"
   }
 ]

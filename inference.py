@@ -41,9 +41,8 @@ MAX_RISK = 0.08
 
 
 
-def get_predict_X(stock_name, sorted_features, start='1950-01-01', max_rows=1000):        
+def get_predict_X(stock_name, sorted_features, start='1950-01-01', max_rows=1000):
   df = load_latest_price_data(stock_name, start, end=None, save=True)
-
 
   df, feature_columns = add_features(df, 10)
   # timestamp = df.index[0]
@@ -52,7 +51,7 @@ def get_predict_X(stock_name, sorted_features, start='1950-01-01', max_rows=1000
   end = None
 
   df, columns = merge_fred(df, 'M2SL', 6, start, end, 4, 2, if_log=True)
-  
+
   feature_columns += columns
   df, columns = merge_fred(df, 'UNRATE', 6, start, end, 1, 5, if_log=False)
   feature_columns += columns
@@ -61,7 +60,7 @@ def get_predict_X(stock_name, sorted_features, start='1950-01-01', max_rows=1000
   feature_columns += columns
   df, _ = remove_nan(df, type='top')
   df_predict_X = df[feature_columns]
-  
+
   return df_predict_X[sorted_features].iloc[-max_rows:]
 
 
@@ -130,10 +129,10 @@ def main(argv):
       sorted_features = np.array(file.read().split('\n'))
 
   sorted_features = sorted_features[sorted_features != '']
-  
+
   # iterate all tickers, reorder the features based on the scores by descending order
   for i in range(len(valid_tickers)):
-    df_train_X_all[i] = df_train_X_all[i][sorted_features]  
+    df_train_X_all[i] = df_train_X_all[i][sorted_features]
     df_test_X_all[i] = df_test_X_all[i][sorted_features]
 
   # You can load it back into memory with the following code
@@ -146,7 +145,7 @@ def main(argv):
     sys.exit(2)
 
   study_svm_name = f'study_svm_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
-  study_svm = optuna.create_study(study_name=study_svm_name, storage=mysql_url, load_if_exists=True)  
+  study_svm = optuna.create_study(study_name=study_svm_name, storage=mysql_url, load_if_exists=True)
   if study_svm.best_trial is None:
     logger.error('No best trial found')
     sys.exit(2)
@@ -161,7 +160,7 @@ def main(argv):
   # the mean of standard deviation of predictions, mean_var_predictions[0] is a number indicating the mean of variance of predictions of the first stock
   # the multiplier which is cov(var_predictions, mse)/var(std_predictions)
   # during inferencing, the conditional expected error is calculated with:
-  # E[errors|std_predictions=std] = mean_errors[i] + multiplier*(std-mean_std_predictions[i]) when 
+  # E[errors|std_predictions=std] = mean_errors[i] + multiplier*(std-mean_std_predictions[i]) when
   exp_profits = []
   final_tickers = []
 
@@ -225,7 +224,7 @@ def main(argv):
       y_pred = (y_pred_rf + y_pred_svr + y_pred_naive) / 3
 
       df_predict_X = get_predict_X(stock_name, sorted_features)
-      
+
       X_predict = df_predict_X.copy().values
 
       y_pred_2_rf = best_pipeline_rf.predict(X_predict)[512:]
@@ -236,11 +235,11 @@ def main(argv):
     except Exception as e:
       logger.error(f'Error in predicting {stock_name}: {e}')
       continue
-    
+
     # save the dict n_days_errors
     with open(f'{data_dir}/n_days_errors.json', 'w') as f:
       json.dump(n_days_errors, f)
-    
+
 
     df_error = pd.DataFrame(y_pred - y_test, index=df_test_y.index, columns=[stock_name])
     if all_errors is None:

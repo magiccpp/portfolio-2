@@ -5,9 +5,10 @@ from sklearn.linear_model import LinearRegression
 
 import pandas as pd
 from datetime import timedelta
+import yfinance as yfin
 from pandas_datareader import data as pdr
 from safeRegressors import SafeRandomForestRegressor, SafeSVR
-import yfinance as yfin
+
 import os
 import time
 import numpy as np
@@ -21,6 +22,8 @@ from scipy.optimize import minimize
 from sklearn.covariance import LedoitWolf
 
 import logging
+
+
 
 logger = logging.getLogger('inference')
 logger.setLevel(logging.DEBUG)  # Set the logging level
@@ -235,8 +238,8 @@ def convert(df, exchange_name, inversion, exchange_name_yahoo):
   if inversion:
     df_rate[exchange_name] = 1/df_rate[exchange_name]
   df_merged = pd.merge_asof(df, df_rate, left_index=True, right_index=True, direction='nearest')
-  df_merged['Close'] = df_merged['Close'] * df_merged[exchange_name]
-  return df_merged[['Close', 'Volume']]
+  df_merged['Adj Close'] = df_merged['Adj Close'] * df_merged[exchange_name]
+  return df_merged[['Adj Close', 'Volume']]
 
 
 class FileLock:
@@ -284,12 +287,17 @@ def load_latest_price_data(stock_name, start='1950-01-01', end=None, save=True, 
 
   with FileLock(lock_path):
     if not is_file_downloaded_recently(file_path, seconds=seconds) or force_download:
-      print('Preparing downloading:', stock_name)
-      data = pdr.get_data_yahoo(stock_name, start=start, end=None, timeout=40)
+      print('Preparing downloading...', stock_name)
+      #data = yfin.download(stock_name, start=start, end=None, auto_adjust=True, timeout=40)
+
+
+
+      data = yfin.Ticker(stock_name).history(start=start, end=None, auto_adjust=False, timeout=40)
+      data.index = data.index.date.astype(str)
 
       if len(data) > 100:
         if save:
-          data.to_csv(file_path)
+          data.to_csv(file_path, index_label='Date')
       else:
         print(f'Cannot download {stock_name}, using old data...')
 
