@@ -136,16 +136,17 @@ def main(argv):
     df_test_X_all[i] = df_test_X_all[i][sorted_features]
 
   # You can load it back into memory with the following code
-  mysql_url = "mysql://root@192.168.2.34:3306/mysql"
+  # mysql_url = "mysql://root@192.168.2.34:3306/mysql"
+  postgres_url = "postgresql+psycopg2://postgres:example@192.168.2.34:5432/app_db"
   n_columns = len(df_train_X_all[0].columns)
   study_rf_name = f'study_rf_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
-  study_rf = optuna.create_study(study_name=study_rf_name, storage=mysql_url, load_if_exists=True)
+  study_rf = optuna.create_study(study_name=study_rf_name, storage=postgres_url, load_if_exists=True)
   if study_rf.best_trial is None:
     logger.error('No best trial found')
     sys.exit(2)
 
   study_svm_name = f'study_svm_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
-  study_svm = optuna.create_study(study_name=study_svm_name, storage=mysql_url, load_if_exists=True)
+  study_svm = optuna.create_study(study_name=study_svm_name, storage=postgres_url, load_if_exists=True)
   if study_svm.best_trial is None:
     logger.error('No best trial found')
     sys.exit(2)
