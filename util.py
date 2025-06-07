@@ -320,6 +320,9 @@ def   get_X_y_by_stock(stock_name, period, start, end, split_date, force_downloa
   except FileNotFoundError:
     print(f'Cannot find data for: {stock_name}')
     return None, None, None, None
+  except Exception as e:
+    print(f'Error loading data for {stock_name}: {e}')
+    return None, None, None, None
 
   print(f'processing {stock_name}...')
   if df is None or len(df) < MIN_TOTAL_DATA_PER_STOCK:
