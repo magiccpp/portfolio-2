@@ -403,9 +403,9 @@ def if_data_exists(data_dir):
   return True
 
 
-def optimize(algo_name, study_name, mysql_url, iterations, objective, get_pipline, valid_tickers, df_train_X_all, df_train_y_all):
+def optimize(algo_name, study_name, postgres_url, iterations, objective, get_pipline, valid_tickers, df_train_X_all, df_train_y_all):
   print(f'Starting finding optimized hyper-parameters for the {algo_name}...')
-  study = optuna.create_study(study_name=study_name, storage=mysql_url, load_if_exists=True)
+  study = optuna.create_study(study_name=study_name, storage=postgres_url, load_if_exists=True)
   # check if study_svm contains best value.
   if len(study.get_trials()) > 0:
     best_value = study.best_trial.value
@@ -511,13 +511,14 @@ def main(argv):
   logger.info('Starting finding optimized hyper-parameters for the random forest...')
   np.random.seed(42)
  
-  mysql_url = "mysql://root@192.168.2.34:3306/mysql"
+  #mysql_url = "mysql://root@192.168.2.34:3306/mysql"
+  postgres_url = "postgresql+psycopg2://postgres:example@192.168.2.34:5432/app_db"
   n_columns = len(df_train_X_all[0].columns)
 
   study_rf_name = f'study_rf_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
   if delete_rf_study:
     try:
-      optuna.delete_study(study_rf_name, storage=mysql_url)
+      optuna.delete_study(study_rf_name, storage=postgres_url)
       logger.info(f'Study {study_rf_name} deleted...')
     except:
       # pass if the study does not exist
@@ -526,17 +527,17 @@ def main(argv):
   study_svm_name = f'study_svm_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
   if delete_svr_study:
     try:
-      optuna.delete_study(study_svm_name, storage=mysql_url)
+      optuna.delete_study(study_svm_name, storage=postgres_url)
       logger.info(f'Study {study_svm_name} deleted...')
     except:
       # pass if the study does not exist
       pass
 
   if rf_iterations > 0:
-    best_pipeline_rf = optimize('Random Forest', study_rf_name, mysql_url, rf_iterations, objective_random_forest, get_pipline_rf,
+    best_pipeline_rf = optimize('Random Forest', study_rf_name, postgres_url, rf_iterations, objective_random_forest, get_pipline_rf,
                                           valid_tickers, df_train_X_all, df_train_y_all)
   if svr_iterations > 0:
-    best_pipeline_svm = optimize('SVM', study_svm_name, mysql_url, svr_iterations, objective_svm, get_pipline_svr,
+    best_pipeline_svm = optimize('SVM', study_svm_name, postgres_url, svr_iterations, objective_svm, get_pipline_svr,
                                           valid_tickers, df_train_X_all, df_train_y_all)
       
   if skip_test:
