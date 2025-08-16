@@ -137,7 +137,7 @@ def main(argv):
 
   # You can load it back into memory with the following code
   # mysql_url = "mysql://root@192.168.2.34:3306/mysql"
-  postgres_url = "postgresql+psycopg2://postgres:example@192.168.2.34:5432/app_db"
+  postgres_url = "postgresql+psycopg2://postgres:example@127.0.0.1:5432/app_db"
   n_columns = len(df_train_X_all[0].columns)
   study_rf_name = f'study_rf_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
   study_rf = optuna.create_study(study_name=study_rf_name, storage=postgres_url, load_if_exists=True)

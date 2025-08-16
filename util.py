@@ -462,7 +462,6 @@ def generate_features(data_dir, df_train_X_all, df_train_y_all, valid_tickers):
   feature_names = list(df_train_X_all[0].columns)
   coefficients = np.zeros(len(feature_names))
   for i in range(len(valid_tickers)):
-      ticker = valid_tickers[i]
       df_train_X_stock = df_train_X_all[i]
       df_train_y_stock = df_train_y_all[i]
       # concat the gspc data to the d_train_X_stock
@@ -493,6 +492,27 @@ def generate_features(data_dir, df_train_X_all, df_train_y_all, valid_tickers):
       f.write("%s\n" % item)
   return sorted_features
 
+def generate_features_individual_stock(df_train_X, df_train_y, stock_id, output_dir):
+  feature_names = list(df_train_X.columns)
+  coefficients = np.zeros(len(feature_names))
+  # scale the features
+  scaler = StandardScaler()
+  df_train_X = scaler.fit_transform(df_train_X)
+
+  # Apply feature selection using SelectKBest
+  #selector = SelectKBest(f_regression, k=5)  # Select 5 best features
+  # X_new = selector.fit_transform(df_train_X_stock, df_train_y_stock['log_predict'])
+
+  # Fit linear regression model
+  model = LinearRegression()
+  model.fit(df_train_X, df_train_y['log_predict'])
+  sorted_scores = np.abs(model.coef_).argsort()[::-1]  # Sort indices in descending order of scores
+  feature_names = np.array(feature_names)
+  sorted_features = feature_names[sorted_scores]
+  with open(f'{output_dir}/sorted_features_{stock_id}.txt', 'w') as f:
+    for item in sorted_features:
+      f.write("%s\n" % item)
+  return sorted_features
 
 def min_func_sharpe(weights, returns, covariance, risk_free_rate):
     portfolio_ret = portfolio_log_return(weights, returns)

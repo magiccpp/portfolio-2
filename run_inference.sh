@@ -50,9 +50,7 @@ wait $PID9
 python ./multi_horizon.py --periods 1,2,4,8,16,32,64,128 --output multi_shorter_horizon >> /tmp/multi_shorter_horizon.log 2>&1
 
 # check current weekday, run below if it is Monday
-if [ "$(date +%u)" -eq 1 ]; then
-  python ./multi_horizon.py --periods 8,16,32,64,128,256 --output multi_horizon >> /tmp/multi_horizon.log 2>&1
-fi
+python ./multi_horizon.py --periods 8,16,32,64,128,256 --output multi_horizon >> /tmp/multi_horizon.log 2>&1
 
 
 # get the latest file under multi_horizon_short

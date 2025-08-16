@@ -468,7 +468,6 @@ def main(argv):
 
   if rf_iterations is None:
     rf_iterations = N_TRIALS
-
   data_dir = f'./processed_data_{period}'
   if reload_data or not if_data_exists(data_dir):
     logger.info(f'Preparing data from {len(selected_tickers)} assets...')
@@ -512,7 +511,7 @@ def main(argv):
   np.random.seed(42)
  
   #mysql_url = "mysql://root@192.168.2.34:3306/mysql"
-  postgres_url = "postgresql+psycopg2://postgres:example@192.168.2.34:5432/app_db"
+  postgres_url = "postgresql+psycopg2://postgres:example@127.0.0.1:5432/app_db"
   n_columns = len(df_train_X_all[0].columns)
 
   study_rf_name = f'study_rf_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
