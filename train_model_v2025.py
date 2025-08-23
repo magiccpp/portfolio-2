@@ -59,7 +59,7 @@ random.seed(42)
 TIMEOUT = 120
 # number of trials to do the hyper-parameter optimization
 N_TRIALS = 50
-postgres_url = "postgresql+psycopg2://postgres:example@192.168.2.34:5432/app_db"
+postgres_url = "postgresql+psycopg2://postgres:example@127.0.0.1:5432/app_db"
 # get_tickers('ssec.txt')
 tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('cac_40.txt') \
   + get_tickers('etf.txt') + get_tickers('nasdaq-100.txt')
@@ -434,7 +434,7 @@ def main(argv):
       # delete: delete the previous study
       opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "svr_iter=", "rf_iter=", "reload", "delete_svr", "delete_rf", "skip_test", "generate_feature_file"])
   except getopt.GetoptError:
-    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete_svr --delete_rf --skip_test --generate_feature_file')
+    logger.error('usage: python train_model_v2025.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete_svr --delete_rf --skip_test --generate_feature_file')
     sys.exit(2)
 
   reload_data = False
