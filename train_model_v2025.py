@@ -497,14 +497,15 @@ def main(argv):
  
 
   n_columns = len(df_train_X_all[0].columns)
+  feature_dir = f'{data_dir}/features'
   for ticker in valid_tickers:
     logger.info(f'Processing {ticker}...')
     df_train_X, df_train_y = df_train_X_all[0], df_train_y_all[0]
-    feature_out_dir = f'{data_dir}/features'
+
     # create the feature directory if it does not exist
-    create_if_not_exist(feature_out_dir)
+    create_if_not_exist(feature_dir)
     logger.info(f'Generating features for {ticker}...')
-    sorted_features = generate_features_individual_stock(df_train_X, df_train_y, ticker, feature_out_dir)
+    sorted_features = generate_features_individual_stock(df_train_X, df_train_y, ticker, feature_dir)
     df_train_X = df_train_X[sorted_features]
     
     logger.info(f'Optimizing Random forest hyper-parameters for {ticker}...')
@@ -543,7 +544,7 @@ def main(argv):
   logger.info(f'Starting test')
   test_naive(valid_tickers, df_test_X_all, df_test_y_all, period)
   #test_rf(best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
-  test_all(data_dir, best_pipeline_rf, best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period)
+  test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period)
   #test_svm(best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
   
 if __name__ == "__main__":

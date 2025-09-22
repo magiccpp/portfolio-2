@@ -54,9 +54,10 @@ python ./multi_horizon.py --periods 8,16,32,64,128,256 --output multi_horizon >>
 
 
 # get the latest file under multi_horizon_short
-# latest_file=$(ls -t /home/ken/git/portfolio-2/multi_horizon_short/* | head -n 1)
-# (   echo "Subject: Janus: Valar Morghulis, Valar Dohaeris.";   echo "";   python verify_weights.py $latest_file; ) | msmtp xiaodong.ken.dai@gmail.com
-# (   echo "Subject: Janus: Valar Morghulis, Valar Dohaeris.";   echo "";   python verify_weights.py $latest_file; ) | msmtp w406971526@gmail.com
+latest_file=$(ls -t /home/ken/git/portfolio-2/multi_horizon_short/* | head -n 1)
+(   echo "Subject: Janus: Valar Morghulis, Valar Dohaeris.";   echo "";   python verify_weights.py $latest_file; ) | msmtp xiaodong.ken.dai@gmail.com
+(   echo "Subject: Janus: Valar Morghulis, Valar Dohaeris.";   echo "";   python verify_weights.py $latest_file; ) | msmtp w406971526@gmail.com
+(   echo "Subject: Janus: Valar Morghulis, Valar Dohaeris.";   echo "";   python verify_weights.py $latest_file; ) | msmtp xulilin20081@gmail.com
 # Deactivate the conda environment
 conda deactivate
 
