@@ -59,7 +59,7 @@ random.seed(42)
 TIMEOUT = 120
 # number of trials to do the hyper-parameter optimization
 N_TRIALS = 50
-postgres_url = "postgresql+psycopg2://postgres:example@127.0.0.1:5432/app_db"
+
 # get_tickers('ssec.txt')
 tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('cac_40.txt') \
   + get_tickers('etf.txt') + get_tickers('nasdaq-100.txt')
@@ -235,7 +235,7 @@ def test_naive(valid_tickers, df_test_X_all, df_test_y_all, period):
   logger.info(f'The MSE of using inverse of last period as prediction: {np.mean(naive_mses_negation)}, std: {np.std(naive_mses_negation)}')
   logger.info(f'The MSE of using average of 512 days: {np.mean(naive_mses_avg_512)}, std: {np.std(naive_mses_avg_512)}')
 
-def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period):
+def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period, postgres_url):
   mses_rf = []
   mses_svm = []
   mses_naive = []
@@ -432,9 +432,9 @@ def main(argv):
   iterations = 10
   try:
       # delete: delete the previous study
-      opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "svr_iter=", "rf_iter=", "reload", "delete_svr", "delete_rf", "skip_test", "generate_feature_file"])
+      opts, args = getopt.getopt(argv, "p:i:d:rd", ["period=", "svr_iter=", "rf_iter=", "postgres_ip=", "reload", "delete_svr", "delete_rf", "skip_test", "generate_feature_file"])
   except getopt.GetoptError:
-    logger.error('usage: python train_model_v2025.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete_svr --delete_rf --skip_test --generate_feature_file')
+    logger.error('usage: python train_model_v2025.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --postgres_ip <postgres_ip>  --reload --delete_svr --delete_rf --skip_test --generate_feature_file')
     sys.exit(2)
 
   reload_data = False
@@ -459,6 +459,14 @@ def main(argv):
         skip_test = True
     elif opt in ("--generate_feature_file"):
         generate_feature_file = True
+    elif opt in ("--postgres_ip"):
+        postgres_ip = arg
+
+
+  if postgres_ip is None:
+    postgres_ip = "127.0.0.1"
+
+  postgres_url = f"postgresql+psycopg2://postgres:example@{postgres_ip}:5432/app_db"
 
 
   if period is None:
@@ -476,7 +484,7 @@ def main(argv):
     start = '1970-01-01'
     end = '2025-01-01'
     valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, mses = \
-      get_X_y(selected_tickers, period, start, end, split_date='2022-01-01', force_download=True)
+      get_X_y(selected_tickers, period, start, end, split_date='2022-01-01', force_download=False)
     save_data(data_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
     logger.info(f'Data saved to {data_dir}...')
   else:
@@ -544,7 +552,7 @@ def main(argv):
   logger.info(f'Starting test')
   test_naive(valid_tickers, df_test_X_all, df_test_y_all, period)
   #test_rf(best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
-  test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period)
+  test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period, postgres_url=postgres_url)
   #test_svm(best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
   
 if __name__ == "__main__":
