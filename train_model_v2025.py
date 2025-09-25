@@ -30,7 +30,8 @@ import getopt
 import sys
 from sklearn.preprocessing import FunctionTransformer
 from util import load_pkl
-
+from optuna.storages import RDBStorage
+from sqlalchemy.pool import NullPool
 
 logger = logging.getLogger('training')
 logger.setLevel(logging.DEBUG)  # Set the logging level
@@ -235,7 +236,7 @@ def test_naive(valid_tickers, df_test_X_all, df_test_y_all, period):
   logger.info(f'The MSE of using inverse of last period as prediction: {np.mean(naive_mses_negation)}, std: {np.std(naive_mses_negation)}')
   logger.info(f'The MSE of using average of 512 days: {np.mean(naive_mses_avg_512)}, std: {np.std(naive_mses_avg_512)}')
 
-def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period, postgres_url):
+def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period, storage):
   mses_rf = []
   mses_svm = []
   mses_naive = []
@@ -263,7 +264,7 @@ def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_al
     
     study_name_rf = f'study_rf_columns_{len(sorted_features)}_stocks_{stock_name}_period_{period}'
     
-    study_rf = optuna.create_study(study_name=study_name_rf, storage=postgres_url, load_if_exists=True)
+    study_rf = optuna.create_study(study_name=study_name_rf, storage=storage, load_if_exists=True)
     best_pipeline_rf = get_pipline_rf(study_rf.best_params)
     best_pipeline_rf.fit(X_train, y_train)
     y_pred_rf = best_pipeline_rf.predict(X_test)
@@ -271,9 +272,9 @@ def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_al
     with open(f'{data_dir}/models/{stock_name}_rf.pkl', 'wb') as f:
       pickle.dump(best_pipeline_rf, f)
       
-    study_name_svm = f'study_rf_columns_{len(sorted_features)}_stocks_{stock_name}_period_{period}'
+    study_name_svm = f'study_svm_columns_{len(sorted_features)}_stocks_{stock_name}_period_{period}'
     
-    study_svm = optuna.create_study(study_name=study_name_svm, storage=postgres_url, load_if_exists=True)
+    study_svm = optuna.create_study(study_name=study_name_svm, storage=storage, load_if_exists=True)
     best_pipeline_svm = get_pipline_svr(study_svm.best_params)
     best_pipeline_svm.fit(X_train, y_train)
     y_pred_svm = best_pipeline_svm.predict(X_test)
@@ -405,9 +406,9 @@ def if_data_exists(data_dir):
   return True
 
 
-def optimize(algo_name, study_name, postgres_url, iterations, objective, get_pipline, df_train_X, df_train_y):
+def optimize(algo_name, study_name, storage, iterations, objective, get_pipline, df_train_X, df_train_y):
   print(f'Starting finding optimized hyper-parameters for the {algo_name}...')
-  study = optuna.create_study(study_name=study_name, storage=postgres_url, load_if_exists=True)
+  study = optuna.create_study(study_name=study_name, storage=storage, load_if_exists=True)
   # check if study_svm contains best value.
   if len(study.get_trials()) > 0:
     best_value = study.best_trial.value
@@ -468,6 +469,14 @@ def main(argv):
 
   postgres_url = f"postgresql+psycopg2://postgres:example@{postgres_ip}:5432/app_db"
 
+# Build a single shared storage once (before your loops)
+  storage = RDBStorage(
+      url=postgres_url,
+      engine_kwargs={
+          # Either disable pooling entirely:
+          "poolclass": NullPool,
+      },
+  )
 
   if period is None:
     logger.error('python train_model_v2025.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete_svr --delete_rf --skip_test --generate_feature_file')
@@ -520,28 +529,28 @@ def main(argv):
     study_rf_name = f'study_rf_columns_{n_columns}_stocks_{ticker}_period_{period}'
     if delete_rf_study:
       try:
-        optuna.delete_study(study_rf_name, storage=postgres_url)
+        optuna.delete_study(study_rf_name, storage=storage)
         logger.info(f'Study {study_rf_name} deleted...')
       except:
         # pass if the study does not exist
         pass
 
     if rf_iterations > 0:
-      best_pipeline_rf = optimize('Random Forest', study_rf_name, postgres_url, rf_iterations, objective_random_forest, get_pipline_rf,
+      best_pipeline_rf = optimize('Random Forest', study_rf_name, storage, rf_iterations, objective_random_forest, get_pipline_rf,
                                           df_train_X, df_train_y)
 
     logger.info(f'Optimizing SVM hyper-parameters for {ticker}...')
     study_svm_name = f'study_svm_columns_{n_columns}_stocks_{ticker}_period_{period}'
     if delete_svr_study:
       try:
-        optuna.delete_study(study_svm_name, storage=postgres_url)
+        optuna.delete_study(study_svm_name, storage=storage)
         logger.info(f'Study {study_svm_name} deleted...')
       except:
         # pass if the study does not exist
         pass
 
     if svr_iterations > 0:
-      best_pipeline_svm = optimize('SVM', study_svm_name, postgres_url, svr_iterations, objective_svm, get_pipline_svr,
+      best_pipeline_svm = optimize('SVM', study_svm_name, storage, svr_iterations, objective_svm, get_pipline_svr,
                                             df_train_X, df_train_y)
     
   
@@ -552,8 +561,13 @@ def main(argv):
   logger.info(f'Starting test')
   test_naive(valid_tickers, df_test_X_all, df_test_y_all, period)
   #test_rf(best_pipeline_rf, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
-  test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period, postgres_url=postgres_url)
+  test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, period, storage=storage)
   #test_svm(best_pipeline_svm, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
-  
+
+  try:
+    storage._engine.dispose()
+  except Exception:
+    pass
+
 if __name__ == "__main__":
     main(sys.argv[1:])
