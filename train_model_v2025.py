@@ -433,7 +433,7 @@ def main(argv):
   iterations = 10
   try:
       # delete: delete the previous study
-      opts, args = getopt.getopt(argv, "p:i:d:rd", ["period=", "svr_iter=", "rf_iter=", "postgres_ip=", "reload", "delete_svr", "delete_rf", "skip_test", "generate_feature_file"])
+      opts, args = getopt.getopt(argv, "", ["period=", "svr_iter=", "rf_iter=", "postgres_ip=", "reload", "delete_svr", "delete_rf", "skip_test", "generate_feature_file"])
   except getopt.GetoptError:
     logger.error('usage: python train_model_v2025.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --postgres_ip <postgres_ip>  --reload --delete_svr --delete_rf --skip_test --generate_feature_file')
     sys.exit(2)

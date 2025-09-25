@@ -222,6 +222,12 @@ def main(argv):
 
       df_predict_X = get_predict_X(stock_name, sorted_features)
 
+      # check the latest date in df_predict_X, if the date is 7 days ago, which means the stock might be delisted, skip it.
+      latest_date = df_predict_X.index[-1]
+      if (pd.Timestamp.now() - latest_date).days > 7:
+        logger.warning(f'Skipping {stock_name} due to stale data. Latest date: {latest_date}')
+        continue
+      
       X_predict = df_predict_X.copy().values
 
       y_pred_2_rf = best_pipeline_rf.predict(X_predict)[512:]
