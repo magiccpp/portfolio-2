@@ -242,6 +242,8 @@ def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_al
   mses_naive = []
   mses = []
   all_errors = None
+  # create {data_dir}/models/ if it doesn't exist
+  create_if_not_exist(f'{data_dir}/models')
   for i in range(len(valid_tickers)):
     stock_name = valid_tickers[i]
     logger.info(f'Starting test on {stock_name}...')
@@ -273,14 +275,37 @@ def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_al
       pickle.dump(best_pipeline_rf, f)
       
     study_name_svm = f'study_svm_columns_{len(sorted_features)}_stocks_{stock_name}_period_{period}'
-    
     study_svm = optuna.create_study(study_name=study_name_svm, storage=storage, load_if_exists=True)
-    best_pipeline_svm = get_pipline_svr(study_svm.best_params)
-    best_pipeline_svm.fit(X_train, y_train)
-    y_pred_svm = best_pipeline_svm.predict(X_test)
-    # save the model to a file
-    with open(f'{data_dir}/models/{stock_name}_svm.pkl', 'wb') as f:
-      pickle.dump(best_pipeline_svm, f)
+    
+    # Get sorted trials by the value (for maximization, desc; for minimization, asc)
+    sorted_trials = sorted(
+      study_svm.trials, 
+      key=lambda t: t.value if t.value is not None else float('-inf'), 
+      reverse=True # or False, depending on your direction
+    )
+  
+    model_found = False
+    y_pred_svm = None  
+    for trial in sorted_trials:
+        if trial.state != 'COMPLETE' or trial.value is None:
+            continue  # Skip failed or pruned trials
+        try:
+            pipeline = get_pipline_svr(trial.params)
+            pipeline.fit(X_train, y_train)
+            y_pred_svm = pipeline.predict(X_test)
+            # Save model!
+            with open(f'{data_dir}/models/{stock_name}_svm.pkl', 'wb') as f:
+                pickle.dump(pipeline, f)
+            print(f"Model from trial {trial.number} fit successfully.")
+            model_found = True
+            break
+        except TimeoutError as e:
+            print(f"TimeoutError for trial {trial.number}: {e}")
+        except Exception as e:
+            print(f"Model from trial {trial.number} failed: {e}")
+
+    if not model_found:
+        print("No valid model could be found!")
 
     # compute the naive prediction
     divisor = 512 / period
@@ -288,7 +313,10 @@ def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_al
     y_pred_naive = df_test_X_naive[f'log_price_diff_512'].rolling(window=512).mean()[512:] / divisor
 
     # y_pred is the average of the two predictions
-    y_pred = (y_pred_svm + y_pred_rf + y_pred_naive) / 3
+    if y_pred_svm is None:
+      y_pred = (y_pred_rf + y_pred_naive) / 2
+    else:
+      y_pred = (y_pred_svm + y_pred_rf + y_pred_naive) / 3
 
     df_error = pd.DataFrame(y_pred - y_test, index=df_test_y.index, columns=[stock_name])
     if all_errors is None:
@@ -298,7 +326,10 @@ def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_al
       all_errors = pd.concat([all_errors, df_error], axis=1, join='outer')
 
     mse_rf = mean_squared_error(y_test, y_pred_rf)
-    mse_svm = mean_squared_error(y_test, y_pred_svm)
+    if y_pred_svm is None:
+      mse_svm = None
+    else:
+      mse_svm = mean_squared_error(y_test, y_pred_svm)
     mse_naive = mean_squared_error(y_test, y_pred_naive)
     mse = mean_squared_error(y_test, y_pred)
 

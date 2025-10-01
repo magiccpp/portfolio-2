@@ -86,19 +86,19 @@ def main(argv):
   iterations = 50
   update_covariance = True
   allow_short = True
-  retrain = True
+  retrain = False
   try:
-      opts, args = getopt.getopt(argv, "p:u", ["period=", "no-update-covariance", "no-retrain"])
+      opts, args = getopt.getopt(argv, "p:u", ["period=", "no-update-covariance", "retrain"])
   except getopt.GetoptError:
-    logger.error('usage: python inference_v2025.py --period=<days> --no-update-covariance --no-retrain')
+    logger.error('usage: python inference_v2025.py --period=<days> --no-update-covariance --retrain')
     sys.exit(2)
   for opt, arg in opts:
     if opt in ("-p", "--period"):
       period = int(arg)
     elif opt in ("-u", "--no-update-covariance"):
       update_covariance = False
-    elif opt in ("--no-retrain"):
-      retrain = False
+    elif opt in ("--retrain"):
+      retrain = True
 
 
   if period is None:
