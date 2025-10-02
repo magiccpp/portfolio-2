@@ -336,7 +336,9 @@ def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_al
     logger.debug(f'{stock_name} MSE RF: {mse_rf}, MSE SVM: {mse_svm}, MSE Naive: {mse_naive}, MSE Ensemble: {mse}')
 
     mses_rf.append(mse_rf)
-    mses_svm.append(mse_svm)
+    if mse_svm is not None:
+      mses_svm.append(mse_svm)
+
     mses_naive.append(mse_naive)
     mses.append(mse)
 

@@ -47,18 +47,21 @@ wait $PID9
 
 # Once all parallel tasks are done, run this command
 
-python ./multi_horizon.py --periods 1,2,4,8,16,32,64,128 --output multi_shorter_horizon >> /tmp/multi_shorter_horizon.log 2>&1
-
 # check current weekday, run below if it is Monday
 python ./multi_horizon.py --periods 8,16,32,64,128,256 --output multi_horizon >> /tmp/multi_horizon.log 2>&1
 
 
 # get the latest file under multi_horizon_short
+rm -rf ./output_chart.png
+python ./compare_visual.py
+
+
 latest_file=$(ls -t /home/ken/git/portfolio-2/multi_horizon_short/* | head -n 1)
-(   echo "Subject: Janus: Valar Morghulis, Valar Dohaeris.";   echo "";   python verify_weights.py $latest_file; ) | msmtp xiaodong.ken.dai@gmail.com
-(   echo "Subject: Janus: Valar Morghulis, Valar Dohaeris.";   echo "";   python verify_weights.py $latest_file; ) | msmtp w406971526@gmail.com
-(   echo "Subject: Janus: Valar Morghulis, Valar Dohaeris.";   echo "";   python verify_weights.py $latest_file; ) | msmtp xulilin20081@gmail.com
-# Deactivate the conda environment
+image_file="output_chart.png"
+sendmail.sh $latest_file $image_file ken.dai@outlook.com
+sendmail.sh $latest_file $image_file w406971526@gmail.com
+sendmail.sh $latest_file $image_file xulilin20081@gmail.com
+
 conda deactivate
 
 
