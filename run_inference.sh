@@ -58,9 +58,9 @@ python ./compare_visual.py
 
 latest_file=$(ls -t /home/ken/git/portfolio-2/multi_horizon_short/* | head -n 1)
 image_file="output_chart.png"
-sendmail.sh $latest_file $image_file ken.dai@outlook.com
-sendmail.sh $latest_file $image_file w406971526@gmail.com
-sendmail.sh $latest_file $image_file xulilin20081@gmail.com
+./sendmail.sh $latest_file $image_file ken.dai@outlook.com
+./sendmail.sh $latest_file $image_file w406971526@gmail.com
+./sendmail.sh $latest_file $image_file xulilin20081@gmail.com
 
 conda deactivate
 

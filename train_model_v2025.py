@@ -32,6 +32,7 @@ from sklearn.preprocessing import FunctionTransformer
 from util import load_pkl
 from optuna.storages import RDBStorage
 from sqlalchemy.pool import NullPool
+from optuna.trial import TrialState
 
 logger = logging.getLogger('training')
 logger.setLevel(logging.DEBUG)  # Set the logging level
@@ -281,13 +282,13 @@ def test_all(data_dir, feature_dir, valid_tickers, df_train_X_all, df_train_y_al
     sorted_trials = sorted(
       study_svm.trials, 
       key=lambda t: t.value if t.value is not None else float('-inf'), 
-      reverse=True # or False, depending on your direction
+      reverse=False # or False, depending on your direction
     )
   
     model_found = False
     y_pred_svm = None  
     for trial in sorted_trials:
-        if trial.state != 'COMPLETE' or trial.value is None:
+        if trial.state != TrialState.COMPLETE or trial.value is None:
             continue  # Skip failed or pruned trials
         try:
             pipeline = get_pipline_svr(trial.params)
