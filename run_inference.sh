@@ -24,14 +24,6 @@ PID5=$! # Store the process ID of the last background command
 python ./inference.py --period 8 &
 PID6=$! # Store the process ID of the last background command
 
-python ./inference.py --period 4 &
-PID7=$! # Store the process ID of the last background command
-
-python ./inference.py --period 2 &
-PID8=$! # Store the process ID of the last background command
-
-python ./inference.py --period 1 &
-PID9=$! # Store the process ID of the last background command
 
 # Wait for all the parallel processes to finish
 wait $PID1

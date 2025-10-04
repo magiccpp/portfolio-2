@@ -15,6 +15,14 @@ import os
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True,  # reconfigure even if handlers already exist
+)
 logger = logging.getLogger('inference')
 logger.setLevel(logging.DEBUG)  # Set the logging level
 

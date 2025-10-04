@@ -14,7 +14,14 @@ import torch
 import os
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
+from optuna.trial import TrialState
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True,  # reconfigure even if handlers already exist
+)
 logger = logging.getLogger('inference')
 logger.setLevel(logging.DEBUG)  # Set the logging level
 
@@ -171,7 +178,12 @@ def main(argv):
     if study_svm.best_trial is None:
       logger.error(f'No best trial found for {stock_name}')
       sys.exit(2)
-
+    # Get sorted trials by the value (for maximization, desc; for minimization, asc)
+    sorted_trials = sorted(
+      study_svm.trials, 
+      key=lambda t: t.value if t.value is not None else float('-inf'), 
+      reverse=False # or False, depending on your direction
+    )
 
     best_pipeline_rf = get_pipline_rf(study_rf.best_params)
     best_pipeline_svr = get_pipline_svr(study_svm.best_params)
@@ -198,10 +210,31 @@ def main(argv):
         best_pipeline_svr = load_pkl(svr_model_path)
       else:
         print(f"retraining svr for stock: {stock_name}")
-        best_pipeline_svr = get_pipline_svr(study_svm.best_params)
-        best_pipeline_svr.fit(X_train, y_train)
-        save_pkl(best_pipeline_svr, svr_model_path)
+        
+        model_found = False
+        y_pred_svm = None  
+        for trial in sorted_trials:
+            if trial.state != TrialState.COMPLETE or trial.value is None:
+                continue  # Skip failed or pruned trials
+            try:
+                pipeline = get_pipline_svr(trial.params)
+                pipeline.fit(X_train, y_train)
+                # Save model!
+                save_pkl(pipeline, svr_model_path)
+                print(f"Model from trial {trial.number} fit successfully.")
+                model_found = True
+                break
+            except TimeoutError as e:
+                print(f"TimeoutError for trial {trial.number}: {e}")
+            except Exception as e:
+                print(f"Model from trial {trial.number} failed: {e}")
 
+        if not model_found:
+            print("No valid model could be found!")
+            continue
+
+        best_pipeline_svr = pipeline
+        
       y_pred_rf = best_pipeline_rf.predict(X_test)
       y_pred_svr = best_pipeline_svr.predict(X_test)
       # compute the naive prediction
