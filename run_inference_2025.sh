@@ -41,7 +41,7 @@ python ./multi_horizon.py --data-dir-prefix processed_data_2025 --periods 8,16,3
 
 
 # get the latest file under multi_horizon_short
-latest_file=$(ls -t /home/ken/git/portfolio-2/multi_horizon_short/* | head -n 1)
+latest_file=$(ls -t /home/ken/git/portfolio-2/multi_horizon_v2025_short/* | head -n 1)
 (   echo "Subject: Janus v2025: Valar Morghulis, Valar Dohaeris.";   echo "";   python verify_weights.py $latest_file; ) | msmtp xiaodong.ken.dai@gmail.com
 # Deactivate the conda environment
 conda deactivate
