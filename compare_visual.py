@@ -403,15 +403,12 @@ model_short_log = load_data('processed_data_128/computed_portfolios_short', mode
 model_short_v2_log = []
 model_short_v2_log = load_data('multi_horizon_short', model_short_v2_log)
 
-model_shorter_short_v2_log = []
-model_shorter_short_v2_log = load_data('multi_shorter_horizon_short', model_shorter_short_v2_log)
+model_v2025_log = []
+model_v2025_log = load_data('multi_horizon_v2025', model_v2025_log)
 
-model_perplexity_log = []
-model_perplexity_log = load_data('perplexity_o3_mini', model_perplexity_log)
+model_short_v2025_log = []
+model_short_v2025_log = load_data('multi_horizon_v2025_short', model_short_v2025_log)
 
-
-model_perplexity_r1_log = []
-model_perplexity_r1_log = load_data('perplexity_deepseek_r1', model_perplexity_r1_log)
 
 human_trace_log = []
 human_trace_log = load_data('human', human_trace_log)
@@ -444,15 +441,11 @@ for log in model_short_v2_log:
     for asset in log['weights']:
         unique_ids.add(asset['id'])
         
-for log in model_shorter_short_v2_log:
+for log in model_v2025_log:
     for asset in log['weights']:
         unique_ids.add(asset['id'])
-
-for log in model_perplexity_log:
-    for asset in log['weights']:
-        unique_ids.add(asset['id'])
-
-for log in model_perplexity_r1_log:
+        
+for log in model_short_v2025_log:
     for asset in log['weights']:
         unique_ids.add(asset['id'])
         
@@ -557,24 +550,13 @@ cur_asset_model_short_v2_hist = [1]
 model_short_v2_contrib_hist = {stock: [] for stock in log_return.columns}
 model_short_v2_weights = np.zeros(len(unique_ids))
 
-cur_asset_model_shorter_short_v2 = 1
-cur_asset_model_shorter_short_v2_hist = [1]
-model_shorter_short_v2_contrib_hist = {stock: [] for stock in log_return.columns}
-model_shorter_short_v2_weights = np.zeros(len(unique_ids))
+cur_asset_model_v2025 = 1
+cur_asset_model_v2025_hist = [1]
+model_v2025_contrib_hist = {stock: [] for stock in log_return.columns}
 
-
-
-
-
-cur_asset_model_perplexity = 1
-cur_asset_model_perplexity_hist = [1]
-model_perplexity_contrib_hist = {stock: [] for stock in log_return.columns}
-model_perplexity_weights = np.zeros(len(unique_ids))
-
-cur_asset_model_perplexity_r1 = 1
-cur_asset_model_perplexity_r1_hist = [1]
-model_perplexity_r1_contrib_hist = {stock: [] for stock in log_return.columns}
-model_perplexity_r1_weights = np.zeros(len(unique_ids))
+cur_asset_model_short_v2025 = 1
+cur_asset_model_short_v2025_hist = [1]
+model_short_v2025_contrib_hist = {stock: [] for stock in log_return.columns}
 
 cur_asset_human = 1
 cur_asset_human_hist = [1]
@@ -628,30 +610,21 @@ for date in log_return.index:
         print(f'update model_short_weights for {date_str}')
         model_short_v2_weights = update_weight(log['weights'], unique_ids)
         
-  if date < pd.Timestamp('2025-06-10'):
-    model_shorter_short_v2_weights = model_short_v2_weights
+  if date < pd.Timestamp('2025-10-05'):
+    model_v2025_weights = model_v2_weights
   else:
-    for log in model_shorter_short_v2_log:
-      if log['date'] == date_str:
-        print(f'update model_short_weights for {date_str}')
-        model_shorter_short_v2_weights = update_weight(log['weights'], unique_ids)
-
-
-  if date < pd.Timestamp('2024-12-21'):
-    model_perplexity_weights = model_short_v2_weights
+    for log in model_v2025_log:
+      if log['date'] == model_v2025_log:
+        print(f'update model_v2025_weights for {date_str}')
+        model_v2025_weights = update_weight(log['weights'], unique_ids)
+        
+  if date < pd.Timestamp('2025-10-05'):
+    model_short_v2025_weights = model_short_v2_weights
   else:
-    for log in model_perplexity_log:
-      if log['date'] == date_str:
-        print(f'update model_short_weights for {date_str}')
-        model_perplexity_weights = update_weight(log['weights'], unique_ids)
-
-  if date < pd.Timestamp('2025-02-02'):
-    model_perplexity_r1_weights = model_v2_weights
-  else:
-    for log in model_perplexity_r1_log:
-      if log['date'] == date_str:
-        print(f'update model_short_weights for {date_str}')
-        model_perplexity_r1_weights = update_weight(log['weights'], unique_ids)
+    for log in model_short_v2025_log:
+      if log['date'] == model_short_v2025_log:
+        print(f'update model_short_v2025_weights for {date_str}')
+        model_short_v2025_weights = update_weight(log['weights'], unique_ids)
 
   daily_log_return_values = log_return.loc[date].values
 
@@ -690,32 +663,23 @@ for date in log_return.index:
   cur_asset_model_short_v2 = cur_asset_model_short_v2 * np.exp(daily_log_return_model_short_v2)
   cur_asset_model_short_v2_hist.append(cur_asset_model_short_v2)
 
-  # model shorter short multiple horizon
-  daily_log_return_model_shorter_short_v2 = np.dot(model_shorter_short_v2_weights, daily_log_return_values)
-  daily_model_shorter_short_v2_contributions = model_shorter_short_v2_weights * daily_log_return_values
-  for stock, contrib in zip(log_return.columns, daily_model_shorter_short_v2_contributions):
-    model_shorter_short_v2_contrib_hist[stock].append(contrib)
+  # model v2025
+  daily_log_return_model_v2025 = np.dot(model_v2025_weights, daily_log_return_values)
+  daily_model_v2025_contributions = model_v2025_weights * daily_log_return_values
+  for stock, contrib in zip(log_return.columns, daily_model_v2025_contributions):
+    model_v2025_contrib_hist[stock].append(contrib)
 
-  cur_asset_model_shorter_short_v2 = cur_asset_model_shorter_short_v2 * np.exp(daily_log_return_model_shorter_short_v2)
-  cur_asset_model_shorter_short_v2_hist.append(cur_asset_model_shorter_short_v2)
+  cur_asset_model_v2025 = cur_asset_model_v2025 * np.exp(daily_log_return_model_v2025)
+  cur_asset_model_v2025_hist.append(cur_asset_model_v2025)
 
-  # model perplexity
-  daily_log_return_model_perplexity = np.dot(model_perplexity_weights, daily_log_return_values)
-  daily_model_perplexity_contributions = model_perplexity_weights * daily_log_return_values
-  for stock, contrib in zip(log_return.columns, daily_model_perplexity_contributions):
-    model_perplexity_contrib_hist[stock].append(contrib)
+  # model short v2025
+  daily_log_return_model_short_v2025 = np.dot(model_short_v2025_weights, daily_log_return_values)
+  daily_model_short_v2025_contributions = model_short_v2025_weights * daily_log_return_values
+  for stock, contrib in zip(log_return.columns, daily_model_short_v2025_contributions):
+    model_short_v2025_contrib_hist[stock].append(contrib)
 
-  cur_asset_model_perplexity = cur_asset_model_perplexity * np.exp(daily_log_return_model_perplexity)
-  cur_asset_model_perplexity_hist.append(cur_asset_model_perplexity)
-
-  # model perplexity r1
-  daily_log_return_model_perplexity_r1 = np.dot(model_perplexity_r1_weights, daily_log_return_values)
-  daily_model_perplexity_r1_contributions = model_perplexity_r1_weights * daily_log_return_values
-  for stock, contrib in zip(log_return.columns, daily_model_perplexity_r1_contributions):
-    model_perplexity_r1_contrib_hist[stock].append(contrib)
-
-  cur_asset_model_perplexity_r1 = cur_asset_model_perplexity_r1 * np.exp(daily_log_return_model_perplexity_r1)
-  cur_asset_model_perplexity_r1_hist.append(cur_asset_model_perplexity_r1)
+  cur_asset_model_short_v2025 = cur_asset_model_short_v2025 * np.exp(daily_log_return_model_short_v2025)
+  cur_asset_model_short_v2025_hist.append(cur_asset_model_short_v2025)
 
   # human brain
   daily_log_return_human = np.dot(human_weights, daily_log_return_values)
@@ -737,9 +701,7 @@ model_contrib_df = pd.DataFrame(model_contrib_hist, index=log_return.index)
 model_v2_contrib_df = pd.DataFrame(model_v2_contrib_hist, index=log_return.index)
 model_short_contrib_df = pd.DataFrame(model_short_contrib_hist, index=log_return.index)
 model_short_v2_contrib_df = pd.DataFrame(model_short_v2_contrib_hist, index=log_return.index)
-model_shorter_short_v2_contrib_df = pd.DataFrame(model_shorter_short_v2_contrib_hist, index=log_return.index)
-model_perplexity_contrib_df = pd.DataFrame(model_perplexity_contrib_hist, index=log_return.index)
-model_perplexity_r1_contrib_df = pd.DataFrame(model_perplexity_contrib_hist, index=log_return.index)
+
 human_contrib_df = pd.DataFrame(human_contrib_hist, index=log_return.index)
 
 # Calculate sum of contributions
@@ -747,9 +709,6 @@ total_model_contrib = model_contrib_df.sum()
 total_model_v2_contrib = model_v2_contrib_df.sum()
 total_model_short_contrib = model_short_contrib_df.sum()
 total_model_short_v2_contrib = model_short_v2_contrib_df.sum()
-total_model_shorter_short_v2_contrib = model_shorter_short_v2_contrib_df.sum()
-total_model_perplexity_contrib = model_perplexity_contrib_df.sum()
-total_model_perplexity_r1_contrib = model_perplexity_contrib_df.sum()
 total_human_contrib = human_contrib_df.sum()
 
 # Get the top 5 contributors
@@ -757,9 +716,6 @@ top5_model_contrib = total_model_contrib.sort_values(ascending=False).head(5)
 top5_model_v2_contrib = total_model_v2_contrib.sort_values(ascending=False).head(5)
 top5_model_short_contrib = total_model_short_contrib.sort_values(ascending=False).head(5)
 top5_model_short_v2_contrib = total_model_short_v2_contrib.sort_values(ascending=False).head(5)
-top5_model_shorter_short_v2_contrib = total_model_shorter_short_v2_contrib.sort_values(ascending=False).head(5)
-top5_model_perplexity_contrib = total_model_perplexity_contrib.sort_values(ascending=False).head(5)
-top5_model_perplexity_r1_contrib = total_model_perplexity_contrib.sort_values(ascending=False).head(5)
 top5_human_contrib = total_human_contrib.sort_values(ascending=False).head(5)
 
 # Get the bottom 5 contributors
@@ -767,9 +723,6 @@ bottom5_model_contrib = total_model_contrib.sort_values().head(5)
 bottom5_model_v2_contrib = total_model_v2_contrib.sort_values().head(5)
 bottom5_model_short_contrib = total_model_short_contrib.sort_values().head(5)
 bottom5_model_short_v2_contrib = total_model_short_v2_contrib.sort_values().head(5)
-bottom5_model_shorter_short_v2_contrib = total_model_shorter_short_v2_contrib.sort_values().head(5)
-bottom5_model_perplexity_contrib = total_model_perplexity_contrib.sort_values().head(5)
-bottom5_model_perplexity_r1_contrib = total_model_perplexity_contrib.sort_values().head(5)
 bottom5_human_contrib = total_human_contrib.sort_values().head(5)
 
 print('cur_asset_model')
@@ -780,10 +733,6 @@ print('cur_asset_model_short')
 print(cur_asset_model_short)
 print('cur_asset_model_short_v2')
 print(cur_asset_model_short_v2)
-print('cur_asset_model_perplexity')
-print(cur_asset_model_perplexity)
-print('cur_asset_model_perplexity_r1')
-print(cur_asset_model_perplexity_r1)
 print('cur_asset_human')
 print(cur_asset_human)
 print('cur_asset_sp500')
@@ -846,16 +795,11 @@ fig.add_trace(go.Scatter(x=date_list, y=cur_asset_model_short_v2_hist, mode='lin
 #fig.add_trace(go.Scatter(x=date_list, y=cur_asset_model_perplexity_r1_hist, mode='lines', name='Perplexity.ai-R1'))
 fig.add_trace(go.Scatter(x=date_list, y=cur_asset_human_hist, mode='lines', name='Human'))
 fig.add_trace(go.Scatter(x=date_list, y=cur_asset_sp500_hist, mode='lines', name='SP500'))
+fig.add_trace(go.Scatter(x=date_list, y=cur_asset_model_v2025_hist, mode='lines', name='Model Multi v2025'))
+fig.add_trace(go.Scatter(x=date_list, y=cur_asset_model_short_v2025_hist, mode='lines', name='Model Short Multi v2025'))
 
 add_vertical_line(fig, '2024-07-20', 'global selectKBest', cur_asset_model_hist, cur_asset_human_hist, cur_asset_sp500_hist)
-#add_vertical_line(fig, '2024-08-08', '2xsigma', cur_asset_model_hist, cur_asset_human_hist, cur_asset_sp500_hist)
-#add_vertical_line(fig, '2024-08-19', 'A share', cur_asset_model_hist, cur_asset_human_hist, cur_asset_sp500_hist)
-#add_vertical_line(fig, '2024-09-06', 'Daily Update', cur_asset_model_hist, cur_asset_human_hist, cur_asset_sp500_hist)
-#add_vertical_line(fig, '2024-09-28', 'Stopped', cur_asset_model_hist, cur_asset_human_hist, cur_asset_sp500_hist)
 add_vertical_line(fig, '2024-10-10', 'multi-horizon', cur_asset_model_hist, cur_asset_human_hist, cur_asset_sp500_hist)
-#add_vertical_line(fig, '2024-11-05', 'reduced limit', cur_asset_model_hist, cur_asset_human_hist, cur_asset_sp500_hist)
 add_vertical_line(fig, '2024-11-30', 'Short models', cur_asset_model_hist, cur_asset_human_hist, cur_asset_sp500_hist)
-#add_vertical_line(fig, '2024-12-22', 'Perplexity', cur_asset_model_hist, cur_asset_human_hist, cur_asset_sp500_hist)
-#add_vertical_line(fig, '2025-02-02', 'DS-R1', cur_asset_model_hist, cur_asset_model_perplexity_hist, cur_asset_sp500_hist)
-# Save as PNG
+add_vertical_line(fig, '2025-10-05', 'v2025!', cur_asset_model_hist, cur_asset_human_hist, cur_asset_sp500_hist)
 fig.write_image("output_chart.png", width=1200, height=800)
