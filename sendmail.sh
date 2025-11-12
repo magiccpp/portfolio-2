@@ -1,4 +1,4 @@
-latest_file=$1
+latest_compare_result=$1
 image_file=$2
 receiver=$3
 
@@ -13,7 +13,7 @@ receiver=$3
   echo "--BOUNDARY"
   echo "Content-Type: text/plain; charset=UTF-8"
   echo
-  python verify_weights.py "$latest_file"
+  cat "$latest_compare_result"
   echo
   echo "--BOUNDARY"
   echo "Content-Type: image/png"

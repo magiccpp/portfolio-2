@@ -49,10 +49,15 @@ python ./compare_visual.py
 
 
 latest_file=$(ls -t /home/ken/git/portfolio-2/multi_horizon_short/* | head -n 1)
+penult_file=$(ls -t /home/ken/git/portfolio-2/multi_horizon_short/* | head -n 2 | tail -n 1)
+python verify_weights.py $latest_file|tail  -n +6|head -n -1>last.txt
+python verify_weights.py $penult_file|tail  -n +6|head -n -1>penult.txt
+python compare_portfolios.py penultimate.txt last.txt >compare_result.txt
+
 image_file="output_chart.png"
-./sendmail.sh $latest_file $image_file ken.dai@outlook.com
-./sendmail.sh $latest_file $image_file w406971526@gmail.com
-./sendmail.sh $latest_file $image_file xulilin20081@gmail.com
+./sendmail.sh compare_result.txt $image_file ken.dai@outlook.com
+./sendmail.sh compare_result.txt $image_file w406971526@gmail.com
+./sendmail.sh compare_result.txt $image_file xulilin20081@gmail.com
 
 conda deactivate
 
