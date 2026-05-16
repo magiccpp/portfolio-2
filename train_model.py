@@ -60,9 +60,6 @@ TIMEOUT = 120
 # number of trials to do the hyper-parameter optimization
 N_TRIALS = 50
 
-# get_tickers('ssec.txt')
-tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('cac_40.txt') + get_tickers('etf.txt')
-selected_tickers = tickers
 
 
 #selected_tickers = random.sample(tickers, 10)
@@ -86,7 +83,6 @@ def get_X_y(selected_tickers, period, start, end, split_date, force_download):
     if df_train_X is None:
       continue 
     
-
     valid_tickers.append(stock_name)
     df_train_X_all.append(df_train_X)
     df_train_y_all.append(df_train_y)
@@ -424,15 +420,16 @@ def optimize(algo_name, study_name, postgres_url, iterations, objective, get_pip
     best_pipeline = get_pipline(study.best_params)
   return best_pipeline
 
+# For NEAT initialization, use below command line
+# python train_model.py --period 128 --svr_iter 10 --rf_iter 10 --reload --delete_svr --delete_rf --skip_test --generate_feature_file --data_dir ./NEAT_data_128 --input_ticket_file data/oldest_24.txt --start_date 1962-01-01 --end_date 1972-01-01 --split_date 1969-01-01
 def main(argv):
   logger.info('training started...')
   period = None
-  iterations = 10
   try:
       # delete: delete the previous study
-      opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "svr_iter=", "rf_iter=", "reload", "delete_svr", "delete_rf", "skip_test", "generate_feature_file"])
+      opts, args = getopt.getopt(argv, "p:i:rd", ["period=", "svr_iter=", "rf_iter=", "reload", "delete_svr", "delete_rf", "skip_test", "generate_feature_file", "data_dir=", "input_ticket_file=", "start_date=", "end_date=", "split_date=", "force_download"])
   except getopt.GetoptError:
-    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete_svr --delete_rf --skip_test --generate_feature_file')
+    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete_svr --delete_rf --skip_test --generate_feature_file --data_dir <data_directory> --input_ticket_file <input_ticket_file> --start_date <start_date> --end_date <end_date> --split_date <split_date>')
     sys.exit(2)
 
   reload_data = False
@@ -440,6 +437,12 @@ def main(argv):
   delete_rf_study = False
   skip_test = False
   generate_feature_file = False
+  data_dir = None
+  input_ticket_file = None
+  start = None
+  end = '2024-01-01'
+  split_date = '2019-01-01'
+  force_download = False
   for opt, arg in opts:
     if opt in ("-p", "--period"):
         period = int(arg)
@@ -457,10 +460,25 @@ def main(argv):
         skip_test = True
     elif opt in ("--generate_feature_file"):
         generate_feature_file = True
-
+    elif opt in ("--data_dir"):
+        data_dir = arg
+    elif opt in ("--input_ticket_file"):
+        input_ticket_file = arg
+    elif opt in ("--start_date"):
+        start = arg
+    elif opt in ("--end_date"):
+        end = arg
+    elif opt in ("--split_date"):
+        split_date = arg
+    elif opt in ("--force_download"):
+        force_download = True
 
   if period is None:
-    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete')
+    logger.error('usage: python train_model.py --period <days> --svr_iter <iterations> --rf_iter <iteration> --reload --delete_svr --delete_rf --skip_test --generate_feature_file --data_dir <data_directory> --ticket_file <input_ticket_file> --start_date <start_date> --end_date <end_date> --split_date <split_date>')
+    sys.exit(2)
+
+  if input_ticket_file is None:
+    logger.info('No input ticket file provided, using default tickers...')
     sys.exit(2)
 
   if svr_iterations is None:
@@ -468,13 +486,21 @@ def main(argv):
 
   if rf_iterations is None:
     rf_iterations = N_TRIALS
-  data_dir = f'./processed_data_{period}'
+
+  if data_dir is None:
+    data_dir = f'./processed_data_{period}'
+
+  if input_ticket_file is None:
+    # get_tickers('ssec.txt')
+    tickers = get_tickers('dax_40.txt') + get_tickers('ftse_100.txt') + get_tickers('sp_500.txt') + get_tickers('omx_30.txt') + get_tickers('cac_40.txt') + get_tickers('etf.txt')
+    selected_tickers = tickers
+  else:
+    with open(input_ticket_file, 'r') as f:
+      selected_tickers = f.read().splitlines()
   if reload_data or not if_data_exists(data_dir):
     logger.info(f'Preparing data from {len(selected_tickers)} assets...')
-    start = '1970-01-01'
-    end = '2024-01-01'
     valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all, mses = \
-      get_X_y(selected_tickers, period, start, end, split_date='2019-01-01', force_download=True)
+      get_X_y(selected_tickers, period, start, end, split_date=split_date, force_download=force_download)
     save_data(data_dir, valid_tickers, df_train_X_all, df_train_y_all, df_test_X_all, df_test_y_all)
     logger.info(f'Data saved to {data_dir}...')
   else:
@@ -489,7 +515,6 @@ def main(argv):
   logger.info(f'Data preparation finished, found {len(valid_tickers)} assets with enough data.')
   logger.info("Finding the importances of features...")
 
-  data_dir = f'./processed_data_{period}'
   feature_file_path = f'./{data_dir}/sorted_features.txt'
   
   if not os.path.exists(feature_file_path) or generate_feature_file:
@@ -514,7 +539,7 @@ def main(argv):
   postgres_url = "postgresql+psycopg2://postgres:example@127.0.0.1:5432/app_db"
   n_columns = len(df_train_X_all[0].columns)
 
-  study_rf_name = f'study_rf_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
+  study_rf_name = f'study_rf_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}_start_{start}_end_{end}_split_{split_date}'
   if delete_rf_study:
     try:
       optuna.delete_study(study_rf_name, storage=postgres_url)
@@ -523,7 +548,7 @@ def main(argv):
       # pass if the study does not exist
       pass
 
-  study_svm_name = f'study_svm_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}'
+  study_svm_name = f'study_svm_columns_{n_columns}_stocks_{len(valid_tickers)}_period_{period}_start_{start}_end_{end}_split_{split_date}'
   if delete_svr_study:
     try:
       optuna.delete_study(study_svm_name, storage=postgres_url)

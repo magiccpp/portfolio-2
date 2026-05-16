@@ -83,6 +83,18 @@ def get_table_by_id_fred(id, path, n_features,
   if not is_file_downloaded_recently(file_path):
     print(f'Metric: {id} need to be refreshed...')
     df = pdr.get_data_fred(id, start='1950-01-01', end=None)
+    # if there is data missing in the df, print out warning and the date of missed data,  and then fill it
+    if df.isnull().any().any():
+      logger.warning(f'NaN values found in FRED data for metric: {id}. Here are the details:')
+      for column in df.columns:
+        if df[column].isnull().any():
+          logger.warning(f'Column "{column}" has {df[column].isnull().sum()} NaN values. Here are the dates with NaN values:')
+          # print out the rows contains NaN
+          logger.warning(df[df[column].isnull()])
+
+      logger.warning(f'Filling NaN values in FRED data for metric: {id} using forward fill method.')
+      df = df.fillna(method='ffill').fillna(method='bfill')
+
     df.to_csv(f'{path}/{id}.csv')
 
   df = pd.read_csv(os.path.join(path, f'{id}.csv'), index_col='DATE', parse_dates=True)

@@ -67,9 +67,10 @@ def get_predict_X(stock_name, sorted_features, start='1950-01-01', max_rows=1000
   df, columns = merge_fred(df, 'FEDFUNDS', 6, start, end, 1, 5, if_log=False)
   feature_columns += columns
   df, _ = remove_nan(df, type='top')
+  df, _ = remove_nan(df, type='bottom')
   df_predict_X = df[feature_columns]
-
-  return df_predict_X[sorted_features].iloc[-max_rows:]
+  df_predict_X = df_predict_X[sorted_features].iloc[-max_rows:]
+  return df_predict_X
 
 
 def min_func_sharpe(weights, returns, covariance, risk_free_rate):
@@ -233,7 +234,8 @@ def main(argv):
       y_pred = (y_pred_rf + y_pred_svr + y_pred_naive) / 3
 
       df_predict_X = get_predict_X(stock_name, sorted_features)
-      
+      print(f"Predicting for stock: {stock_name}, using data from {df_predict_X.index[0]} to {df_predict_X.index[-1]}")
+
       # check the latest date in df_predict_X, if the date is 7 days ago, which means the stock might be delisted, skip it.
       latest_date = df_predict_X.index[-1]
       if (pd.Timestamp.now() - latest_date).days > 7:
@@ -249,6 +251,21 @@ def main(argv):
       logging.info(f"inference {period} length: y_pred_2_naive: {len(y_pred_2_naive)}, y_pred_2_rf: {len(y_pred_2_rf)}, y_pred_2_svr: {len(y_pred_2_svr)}")
     except Exception as e:
       logger.error(f'Error in predicting {stock_name}: {e}')
+      print(f"\n[ERROR] Exception for stock: {stock_name}")
+      print(f"Exception: {e}")
+      print(f"X_train shape: {X_train.shape}, X_test shape: {X_test.shape}")
+      print(f"Number of NaNs in X_train: {np.isnan(X_train).sum()}, X_test: {np.isnan(X_test).sum()}")
+      print(f"Any NaNs in X_train? {np.isnan(X_train).any()}, in X_test? {np.isnan(X_test).any()}")
+      print(f"Number of NaNs in X_predict: {np.isnan(X_predict).sum()}")
+      print(f"Any NaNs in X_predict? {np.isnan(X_predict).any()}")
+
+      print(f"First few rows of X_test with NaNs (if any):")
+      if np.isnan(X_test).any():
+          print(pd.DataFrame(X_test).isna().sum(axis=1).head(10))
+
+      print(f"First few rows of X_predict with NaNs (if any):")
+      if np.isnan(X_predict).any():
+          print(pd.DataFrame(X_predict).isna().sum(axis=1).head(10))
       continue
 
     # save the dict n_days_errors

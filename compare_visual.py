@@ -365,6 +365,9 @@ def load_data(trace_log_dir, trace_log):
       with open(os.path.join(folder, file)) as f:
           data = json.load(f)
 
+      if len(data) == 0:
+          continue
+      
       if '_' in data[0]["id"]:
             # Dictionary to store combined weights
             combined_weights = {}

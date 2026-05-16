@@ -42,6 +42,8 @@ wait $PID9
 # check current weekday, run below if it is Monday
 python ./multi_horizon.py --periods 8,16,32,64,128,256 --output multi_horizon >> /tmp/multi_horizon.log 2>&1
 
+cp -rf ./multi_horizon/* ../orch/models_output_json/multi_horizon
+cp -rf ./multi_horizon_short/* ../orch/models_output_json/multi_horizon_short
 
 # get the latest file under multi_horizon_short
 rm -rf ./output_chart.png
